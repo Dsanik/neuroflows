@@ -836,7 +836,7 @@ function CheckIn({ onClose }) {
   const animClass = direction === 'next' ? 'slide-right' : 'slide-left';
 
   return html`
-    <div style="position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--bg);color:var(--text);animation:fadeIn 0.25s ease;">
+    <div style="position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:var(--bg);color:var(--text);animation:fadeIn 0.25s ease;">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2);">
         <button onClick=${back} style="font-size:14px;padding:6px 10px;background:none;border:none;color:var(--text2);font-weight:600;cursor:pointer;border-radius:8px;transition:all 0.15s;"
           onTouchStart=${e=>e.currentTarget.style.background='var(--surface)'} onTouchEnd=${e=>e.currentTarget.style.background='transparent'}
@@ -1017,6 +1017,7 @@ function App() {
       ${tab==='calendar' && html`<${Calendar} />`}
       ${checkInOpen && html`<${CheckIn} onClose=${()=>setCheckInOpen(false)} />`}
 
+      ${!checkInOpen && html`
       <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
         ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'}].map(t => html`
           <button key=${t.k} onClick=${()=>changeTab(t.k)} 
@@ -1026,6 +1027,7 @@ function App() {
           </button>
         `)}
       </nav>
+      `}
     </div>
   `;
 }
