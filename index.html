@@ -3,16 +3,82 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<meta name="theme-color" content="#ffffff" />
+<meta name="theme-color" content="#0f1419" />
 <title>NeuroFlow</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script type="text/javascript" nonce="2d246c35705741618c01780eb49" src="//local.adguard.org?ts=1786820613191&amp;type=content-script&amp;dmn=prod-chat-kimi.tos-cn-beijing.volces.com&amp;url=https%3A%2F%2Fprod-chat-kimi.tos-cn-beijing.volces.com%2Fkimi-fs%2Fokc%2Fy4jar2hgiaem4%2Foutput%2Findex.html%3FX-Tos-Algorithm%3DTOS4-HMAC-SHA256%26X-Tos-Credential%3DAKLTYTJlNjgwMjY2ZDBkNDFiYmI5YWNiZDBlZmFmYjIzZTA%252F20260815%252Fcn-beijing%252Ftos%252Frequest%26X-Tos-Date%3D20260815T204509Z%26X-Tos-Expires%3D518400%26X-Tos-Signature%3D72e07e18af019a3c8a1f70e2771c19bc336b3a7a97a54d51fbda2412475ea315%26X-Tos-SignedHeaders%3Dhost%26response-content-disposition%3Dattachment%253B%2Bfilename%252A%253DUTF-8%2527%2527index.html&amp;app=com.android.chrome&amp;css=3&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=0"></script><script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none;background:var(--tg-bg,#fff);color:var(--tg-text,#000)}
-input,button,select,textarea{font-family:inherit}
-input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:8px;border-radius:999px;background:var(--tg-secondary-bg,#e5e7eb);outline:none}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:999px;background:var(--tg-button,#000);cursor:pointer}
-input[type=date]{-webkit-appearance:none;appearance:none;font-size:16px}
+  :root {
+    --bg: #0f1419;
+    --bg2: #161e2e;
+    --surface: #1e293b;
+    --surface-hover: #253449;
+    --text: #f1f5f9;
+    --text2: #94a3b8;
+    --accent: #38bdf8;
+    --accent-soft: rgba(56, 189, 248, 0.15);
+    --accent-glow: rgba(56, 189, 248, 0.3);
+    --border: rgba(148, 163, 184, 0.12);
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --love: #f472b6;
+    --purple: #a78bfa;
+    --tg-bg: #0f1419;
+    --tg-secondary-bg: #161e2e;
+    --tg-text: #f1f5f9;
+    --tg-hint: #94a3b8;
+    --tg-button: #38bdf8;
+    --tg-button-text: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #root { min-height: 100%; }
+  input, button, select, textarea { font-family: inherit; outline: none; }
+
+  /* Range slider */
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 6px;
+    border-radius: 999px; background: var(--surface-hover); outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+    box-shadow: 0 0 16px var(--accent-glow); border: 3px solid var(--bg2);
+    margin-top: -8px; transition: transform 0.15s;
+  }
+  input[type=range]::-webkit-slider-thumb:active { transform: scale(1.2); }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 999px;
+  }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeInScale { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @keyframes slideInRight { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes slideInLeft { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
+  .anim { animation: fadeIn 0.5s ease both; }
+  .anim-scale { animation: fadeInScale 0.4s ease both; }
+  .slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .slide-right { animation: slideInRight 0.35s ease both; }
+  .slide-left { animation: slideInLeft 0.35s ease both; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 0; height: 0; }
+
+  /* Selection */
+  ::selection { background: var(--accent-soft); color: var(--text); }
 </style>
 <script type="importmap">
 {"imports":{
