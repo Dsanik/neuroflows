@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { html } from 'htm/preact';
 
 // ===== TELEGRAM THEME =====
-const tg = window.Telegram?.WebApp;
+const tg = window.Telegram?.WebApp || {};
 if (tg) {
   tg.ready();
   tg.expand();
@@ -227,7 +227,7 @@ function BrainStatusBadge({ profile }) {
   if (!profile) return null;
   const { cnsCapacity, phase } = profile;
   const color = NeuroEngine.getPhaseColor(phase);
-  const st = cns >= 80 ? { l: 'Пик производительности', e: '🚀' }
+  const st = cnsCapacity >= 80 ? { l: 'Пик производительности', e: '🚀' }
     : cns >= 60 ? { l: 'Высокий ресурс', e: '⚡' }
     : cns >= 40 ? { l: 'Средний ресурс', e: '💡' }
     : cns >= 20 ? { l: 'Низкий ресурс', e: '🌙' }
@@ -379,8 +379,9 @@ function NeuroPlanner() {
 function MonthGrid() {
   const lastPeriodStart = store.getState().lastPeriodStart;
   const days = useMemo(() => {
-    if (!lastPeriodStart) return [];
-    const start = new Date(lastPeriodStart);
+    const lps = store.getState().lastPeriodStart;
+    if (!lps) return [];
+    const start = new Date(lps);
     const res = [];
     for (let i = 0; i < 28; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
@@ -389,7 +390,7 @@ function MonthGrid() {
       res.push({ date: d, dayNum: dn, phase: ph, color: NeuroEngine.getPhaseColor(ph) });
     }
     return res;
-  }, [lastPeriodStart]);
+  }, []);
   const today = new Date().getDate();
   const tMonth = new Date().getMonth();
   return html`
@@ -674,9 +675,10 @@ function App() {
   const [profile, setProfile] = useState(store.getState().currentProfile);
 
   useEffect(() => {
-    store.subscribe(s => { setLps(s.lastPeriodStart); setProfile(s.currentProfile); });
+    const unsub = store.subscribe(s => { setLps(s.lastPeriodStart); setProfile(s.currentProfile); });
     const uid = tg?.initDataUnsafe?.user?.id;
-    if (uid) initStore(uid.toString());
+    initStore(uid ? uid.toString() : 'guest');
+    return unsub;
   }, []);
 
   useEffect(() => {
