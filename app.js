@@ -91,20 +91,27 @@ const store = {
   setDraft: log => { state.draftLog = log; saveStore(); pub(); },
   clearDraft: () => { state.draftLog = null; saveStore(); pub(); },
   markTutorial: () => { state.tutorialSeen = true; localStorage.setItem(TUTORIAL_KEY, 'true'); pub(); },
+  resetAll: () => {
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(TUTORIAL_KEY);
+    location.reload();
+  },
   toggleTaskCheck: (date, tab, id) => {
-    state.taskChecks[date] = state.taskChecks[date] || {};
-    state.taskChecks[date][tab] = state.taskChecks[date][tab] || {};
-    state.taskChecks[date][tab][id] = !state.taskChecks[date][tab][id];
+    const dayChecks = { ...(state.taskChecks[date] || {}) };
+    const tabChecks = { ...(dayChecks[tab] || {}) };
+    tabChecks[id] = !tabChecks[id];
+    dayChecks[tab] = tabChecks;
+    state.taskChecks = { ...state.taskChecks, [date]: dayChecks };
     saveStore(); pub();
   },
   addCustomTask: (tab, text) => {
     if (!text.trim()) return;
-    state.customTasks[tab] = state.customTasks[tab] || [];
-    state.customTasks[tab].push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2,6), text: text.trim() });
+    const newTask = { id: 'c' + Date.now() + Math.random().toString(36).slice(2,6), text: text.trim() };
+    state.customTasks = { ...state.customTasks, [tab]: [...(state.customTasks[tab] || []), newTask] };
     saveStore(); pub();
   },
   removeCustomTask: (tab, id) => {
-    state.customTasks[tab] = (state.customTasks[tab] || []).filter(t => t.id !== id);
+    state.customTasks = { ...state.customTasks, [tab]: (state.customTasks[tab] || []).filter(t => t.id !== id) };
     saveStore(); pub();
   },
 };
@@ -796,6 +803,18 @@ function Calendar() {
           `)}
         </div>
       `)}
+
+      ${view==='stats' && html`
+        <div style="margin-top:24px;text-align:center;">
+          <button onClick=${() => {
+            const doReset = () => store.resetAll();
+            if (tg?.showConfirm) tg.showConfirm('Удалить все данные приложения (циклы, чек-ины, отметки)? Это нельзя отменить.', ok => { if (ok) doReset(); });
+            else if (confirm('Удалить все данные приложения? Это нельзя отменить.')) doReset();
+          }} style="background:none;border:none;color:${theme.danger};font-size:13px;font-weight:600;padding:10px;cursor:pointer;opacity:0.8;">
+            Сбросить все данные приложения
+          </button>
+        </div>
+      `}
 
       ${selectedDate && html`<${DayDetailModal} date=${selectedDate} dayData=${logs[selectedDate]} onClose=${()=>setSelectedDate(null)} />`}
     <//>
