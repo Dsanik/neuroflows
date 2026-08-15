@@ -62,6 +62,20 @@ const KEY = 'nf_v2';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
 let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false };
+
+// Migration from v1 to v2
+const V1_KEY = 'nf_v1';
+try {
+  const v1raw = localStorage.getItem(V1_KEY);
+  if (v1raw && !localStorage.getItem(KEY)) {
+    const v1 = JSON.parse(v1raw);
+    state = { ...state, ...v1 };
+    localStorage.setItem(KEY, JSON.stringify(state));
+    localStorage.removeItem(V1_KEY);
+    console.log('[NeuroFlow] Migrated data from v1 to v2');
+  }
+} catch(e) { console.error('[NeuroFlow] Migration failed:', e); }
+
 try {
   const raw = localStorage.getItem(KEY);
   if (raw) state = { ...state, ...JSON.parse(raw) };
@@ -74,7 +88,7 @@ const store = {
   sub: cb => { subs.push(cb); return () => { subs = subs.filter(c => c !== cb); }; },
   setProfile: p => { state.profile = p; saveStore(); pub(); },
   setLps: d => { state.lastPeriodStart = d; saveStore(); compute(); pub(); },
-  addLog: log => { state.logs[log.date] = log; saveStore(); pub(); },
+  addLog: log => { state.logs[log.date] = log; recalcAverageCycle(); saveStore(); compute(); pub(); },
   setDraft: log => { state.draftLog = log; saveStore(); pub(); },
   clearDraft: () => { state.draftLog = null; saveStore(); pub(); },
   markTutorial: () => { state.tutorialSeen = true; localStorage.setItem(TUTORIAL_KEY, 'true'); pub(); },
@@ -92,12 +106,51 @@ const NE = {
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#10B981',follicular:'#F59E0B',ovulation:'#EF4444',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
-  insight(ph, day) { const map={menstruation:'Прогестерон и эстроген на минимуме. Энергия низкая, ЦНС восстанавливается.',follicular:'Эстроген растёт. Идеальное время для новых проектов и обучения.',ovulation:`День ${day}: тестостерон и эстроген на пике. Уверенность максимальна.`,luteal:'Прогестерон доминирует. Глубокий фокус, но следи за тревожностью.'}; return map[ph]; },
+  insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
   food(ph) { return {menstruation:'Железо, витамин C, тёплая еда',follicular:'Белок, зелень, пробиотики',ovulation:'Овощи, антиоксиданты, омега-3',luteal:'Сложные углеводы, магний, витамин B6'}[ph]; },
-  intim(ph) { return {menstruation:'Реактивное либидо, нежность',follicular:'Спонтанное желание, эксперименты',ovulation:'Пик либидо, фертильность максимальна',luteal:'Мягкость, эмоциональная близость'}[ph]; },
+  intim(ph) { return {menstruation:'Обычно в этой фазе: реактивное либидо, потребность в нежности',follicular:'Обычно в этой фазе: спонтанное желание, openness к экспериментам',ovulation:'Обычно в этой фазе: пик либидо, максимальная фертильность',luteal:'Обычно в этой фазе: мягкость, потребность в эмоциональной близости'}[ph]; },
 };
+
+function dayOfCycleForDate(date, lps, cycleLength) {
+  if (!lps || !cycleLength) return null;
+  const st = new Date(lps + 'T00:00:00').getTime();
+  const dt = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diff = Math.floor((dt - st) / 86400000);
+  if (diff < 0) return null;
+  const day = (diff % cycleLength) + 1;
+  return day > 0 ? day : 1;
+}
+
+function recalcAverageCycle() {
+  const { logs, profile } = state;
+  if (!profile) return;
+  const periodDates = Object.entries(logs)
+    .filter(([_, log]) => log.isPeriod)
+    .map(([date, _]) => date)
+    .sort();
+  if (periodDates.length < 2) return;
+  const cycleStarts = [];
+  let currentStart = periodDates[0];
+  for (let i = 1; i < periodDates.length; i++) {
+    const prev = new Date(periodDates[i-1]);
+    const curr = new Date(periodDates[i]);
+    const diff = Math.round((curr - prev) / 86400000);
+    if (diff > 1) {
+      cycleStarts.push({ start: new Date(currentStart), end: new Date(periodDates[i-1]), next: curr });
+      currentStart = periodDates[i];
+    }
+  }
+  const lengths = cycleStarts.map(c => Math.round((c.next - c.start) / 86400000));
+  const valid = lengths.filter(l => l >= 21 && l <= 35);
+  if (valid.length > 0) {
+    const avg = Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+    if (avg !== profile.averageCycleLength) {
+      profile.averageCycleLength = avg;
+    }
+  }
+}
 
 function compute() {
   const { profile, lastPeriodStart } = state;
@@ -123,6 +176,7 @@ function initStore(id) {
 const haptic = (t='light') => tg?.HapticFeedback?.impactOccurred?.(t);
 const notify = (t='success') => tg?.HapticFeedback?.notificationOccurred?.(t);
 const todayStr = () => new Date().toISOString().split('T')[0];
+const isSameDay = (a, b) => a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 
 function Scrollable({ children, style }) {
   return html`<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;${style || ''}">${children}</div>`;
@@ -347,7 +401,9 @@ function Dashboard({ onCheckIn }) {
 
   const c = NE.pc(profile.phase);
   const circ = 2 * Math.PI * 90;
-  const offset = circ - (profile.dayOfCycle / 28) * circ;
+  const profileState = store.getState().profile;
+  const cycleLen = profileState?.averageCycleLength || 28;
+  const offset = circ - (profile.dayOfCycle / cycleLen) * circ;
 
   return html`
     <${Scrollable} style="padding:28px 20px 120px;">
@@ -506,29 +562,76 @@ function Planner() {
 }
 
 
+function DayDetailModal({ date, dayData, onClose }) {
+  const d = new Date(date + 'T00:00:00');
+  const log = dayData || {};
+  const hasData = !!dayData;
+
+  return html`
+    <div style="position:fixed;inset:0;z-index:120;background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);display:flex;flex-direction:column;justify-content:flex-end;animation:fadeIn 0.2s ease;" onClick=${onClose}>
+      <div style="background:var(--bg2);border-radius:28px 28px 0 0;padding:28px 20px 40px;border-top:1px solid var(--border);box-shadow:0 -16px 48px rgba(0,0,0,0.4);animation:slideUp 0.35s cubic-bezier(0.16,1,0.3,1);" onClick=${e => e.stopPropagation()}>
+        <div style="width:40px;height:5px;border-radius:999px;background:var(--surface-hover);margin:0 auto 20px;" />
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <h3 style="font-size:20px;font-weight:800;">${d.getDate()} ${['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][d.getMonth()]} ${d.getFullYear()}</h3>
+          <button onClick=${onClose} style="background:var(--surface);border:none;border-radius:12px;width:36px;height:36px;color:var(--text);font-size:18px;cursor:pointer;">✕</button>
+        </div>
+        ${!hasData && html`<p style="color:var(--text2);text-align:center;padding:20px 0;">Нет записи за этот день</p>`}
+        ${hasData && html`
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            ${log.isPeriod && html`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;background:${theme.danger}15;border:1px solid ${theme.danger}30;"><span style="font-size:20px;">🩸</span><span style="font-weight:700;color:${theme.danger};">Менструация</span></div>`}
+            ${log.symptoms?.length > 0 && html`
+              <div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);">
+                <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Симптомы</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                  ${log.symptoms.map(s => html`<span key=${s} style="padding:5px 10px;border-radius:8px;background:var(--bg);font-size:12px;font-weight:600;color:var(--text);">${{cramps:'Спазмы',bloating:'Вздутие',headache:'Головная боль',breast_tenderness:'Чувств. груди',acne:'Высыпания',fatigue:'Усталость',insomnia:'Бессонница',cravings:'Тяга к сладкому'}[s] || s}</span>`)}
+                </div>
+              </div>
+            `}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              ${[{l:'Энергия',v:log.energyLevel,c:'#10B981'},{l:'Фокус',v:log.focusLevel,c:'#F59E0B'},{l:'Тревожность',v:log.anxietyLevel,c:'#EF4444'},{l:'Сон',v:log.sleepQuality,c:'#6366F1'}].map(m => html`
+                <div key=${m.l} style="padding:12px;border-radius:14px;background:var(--surface);border:1px solid var(--border);">
+                  <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600;">${m.l}</div>
+                  <div style="font-size:18px;font-weight:800;color:${m.c};">${m.v}/5</div>
+                </div>
+              `)}
+            </div>
+            ${log.mood && html`<div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">${{euphoric:'🤩',calm:'😌',irritated:'😤',sad:'😢',anxious:'😰',numb:'😶'}[log.mood]}</span><span style="font-weight:600;">${{euphoric:'Эйфория',calm:'Спокойствие',irritated:'Раздражение',sad:'Грусть',anxious:'Тревога',numb:'Апатия'}[log.mood]}</span></div>`}
+            ${log.intimacy?.occurred && html`<div style="padding:12px 16px;border-radius:14px;background:${theme.love}10;border:1px solid ${theme.love}25;"><div style="font-size:11px;font-weight:700;color:${theme.love};text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;">Интимность</div><div style="font-size:14px;font-weight:600;">${log.intimacy.type==='partner'?'С партнёром':'Соло'} ${log.intimacy.orgasm?'✨':''} ${log.intimacy.discomfort?'⚠':''}</div></div>`}
+            ${log.cervicalMucus && log.cervicalMucus !== 'dry' && html`<div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text2);font-weight:600;">Шейная слизь</div><div style="font-size:14px;font-weight:700;margin-top:4px;">${{dry:'Сухо',sticky:'Липкие',creamy:'Кремовые',egg_white:'Яичный белок'}[log.cervicalMucus]}</div></div>`}
+          </div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
 function Calendar() {
   const [view, setView] = useState('calendar');
+  const [viewDate, setViewDate] = useState(() => new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
   const [logs, setLogs] = useState(store.getState().logs);
-  useEffect(() => store.sub(s => setLogs(s.logs)), []);
+  const [profile, setProfile] = useState(store.getState().profile);
 
-  const days = useMemo(() => {
-    const lps = store.getState().lastPeriodStart;
-    if (!lps) return [];
-    const start = new Date(lps + 'T00:00:00');
-    const res = [];
-    for (let i = 0; i < 35; i++) {
-      const d = new Date(start); d.setDate(start.getDate() + i);
-      const dn = i + 1;
-      const ph = NE.phase(dn);
-      res.push({ date: d, dayNum: dn, phase: ph, color: NE.pc(ph) });
-    }
-    return res;
-  }, [store.getState().lastPeriodStart]);
+  useEffect(() => store.sub(s => { setLogs(s.logs); setProfile(s.profile); }), []);
+
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startOffset = firstDay === 0 ? 6 : firstDay - 1;
+
+  const days = [];
+  for (let i = 0; i < startOffset; i++) days.push(null);
+  for (let i = 1; i <= daysInMonth; i++) days.push(i);
 
   const today = new Date();
-  const todayDate = today.getDate();
-  const todayMonth = today.getMonth();
-  const todayYear = today.getFullYear();
+  const lps = store.getState().lastPeriodStart;
+  const cycleLength = profile?.averageCycleLength || 28;
+
+  const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
+
+  const months = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
   const stats = useMemo(() => {
     const entries = Object.values(logs);
@@ -549,19 +652,40 @@ function Calendar() {
 
       ${view==='calendar' && html`
         <${Card} class="anim">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <button onClick=${prevMonth} style="background:var(--surface);border:none;border-radius:12px;width:36px;height:36px;color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.9)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}>‹</button>
+            <div style="font-size:17px;font-weight:700;color:var(--text);">${months[month]} ${year}</div>
+            <button onClick=${nextMonth} style="background:var(--surface);border:none;border-radius:12px;width:36px;height:36px;color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.9)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}>›</button>
+          </div>
           <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;">
             ${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d => html`<div key=${d} style="text-align:center;font-size:11px;color:var(--text2);padding:8px 0;font-weight:700;">${d}</div>`)}
-            ${days.map(d => {
-              const isToday = d.date.getDate() === todayDate && d.date.getMonth() === todayMonth && d.date.getFullYear() === todayYear;
+            ${days.map((d, i) => {
+              if (!d) return html`<div key=${i} />`;
+              const dateObj = new Date(year, month, d);
+              const iso = dateObj.toISOString().split('T')[0];
+              const log = logs[iso];
+              const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
+              const ph = dayNum ? NE.phase(dayNum, cycleLength) : null;
+              const color = ph ? NE.pc(ph) : 'var(--text2)';
+              const isToday = isSameDay(dateObj, today);
+              const isFuture = dateObj > today;
+              const hasLog = !!log;
+              const isPeriod = log?.isPeriod;
+              const hasSymptoms = log?.symptoms?.length > 0;
+
               return html`
-                <div key=${d.dayNum} style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${d.color}12;position:relative;transition:all 0.2s;border:1px solid ${isToday?d.color+'40':'transparent'};"
+                <button key=${i} onClick=${()=>{haptic('medium');setSelectedDate(iso);}}
+                  style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?(color+'60'):'transparent'};background:${hasLog?(color+'20'):(color+'08')};opacity:${isFuture?0.5:1};color:var(--text);cursor:pointer;padding:0;"
                   onTouchStart=${e=>e.currentTarget.style.transform='scale(0.92)'}
                   onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
                 >
-                  ${isToday && html`<div style="position:absolute;top:4px;right:4px;width:5px;height:5px;border-radius:50%;background:${d.color};box-shadow:0 0 6px ${d.color}80;" />`}
-                  <span style="font-size:13px;font-weight:800;color:${d.color};">${d.date.getDate()}</span>
-                  <span style="font-size:8px;color:var(--text2);margin-top:3px;opacity:0.6;font-weight:500;">${d.dayNum}д</span>
-                </div>
+                  <span style="font-size:13px;font-weight:800;color:${color};">${d}</span>
+                  ${dayNum && html`<span style="font-size:8px;color:var(--text2);margin-top:2px;opacity:0.7;font-weight:500;">${dayNum}д</span>`}
+                  <div style="display:flex;gap:2px;margin-top:3px;height:5px;align-items:center;">
+                    ${isPeriod && html`<div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};box-shadow:0 0 4px ${theme.danger}80;" />`}
+                    ${hasSymptoms && html`<div style="width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px ${theme.accentGlow};" />`}
+                  </div>
+                </button>
               `;
             })}
           </div>
@@ -572,6 +696,12 @@ function Calendar() {
                 <span style="font-size:11px;color:var(--text2);font-weight:500;">${p[1]}</span>
               </div>
             `)}
+          </div>
+          <div style="display:flex;justify-content:center;gap:16px;margin-top:16px;flex-wrap:wrap;opacity:0.7;">
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};" /><span style="font-size:10px;color:var(--text2);">Менструация</span></div>
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" /><span style="font-size:10px;color:var(--text2);">Симптомы</span></div>
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:var(--surface);border:1px solid var(--border);" /><span style="font-size:10px;color:var(--text2);">Прогноз</span></div>
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:var(--surface);border:1px solid var(--accent);" /><span style="font-size:10px;color:var(--text2);">Факт</span></div>
           </div>
         <//>
       `}
@@ -597,10 +727,11 @@ function Calendar() {
           `)}
         </div>
       `)}
+
+      ${selectedDate && html`<${DayDetailModal} date=${selectedDate} dayData=${logs[selectedDate]} onClose=${()=>setSelectedDate(null)} />`}
     <//>
   `;
 }
-
 
 const defaultLog = {
   date: todayStr(), isPeriod: false, energyLevel: 3, focusLevel: 3, anxietyLevel: 2,
