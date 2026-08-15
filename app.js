@@ -60,7 +60,7 @@ if (tg) {
 const KEY = 'nf_v2';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
-let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false };
+let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false, taskChecks: {}, customTasks: { work: [], body: [], food: [] } };
 
 // Migration from v1 to v2
 const V1_KEY = 'nf_v1';
@@ -91,6 +91,22 @@ const store = {
   setDraft: log => { state.draftLog = log; saveStore(); pub(); },
   clearDraft: () => { state.draftLog = null; saveStore(); pub(); },
   markTutorial: () => { state.tutorialSeen = true; localStorage.setItem(TUTORIAL_KEY, 'true'); pub(); },
+  toggleTaskCheck: (date, tab, id) => {
+    state.taskChecks[date] = state.taskChecks[date] || {};
+    state.taskChecks[date][tab] = state.taskChecks[date][tab] || {};
+    state.taskChecks[date][tab][id] = !state.taskChecks[date][tab][id];
+    saveStore(); pub();
+  },
+  addCustomTask: (tab, text) => {
+    if (!text.trim()) return;
+    state.customTasks[tab] = state.customTasks[tab] || [];
+    state.customTasks[tab].push({ id: 'c' + Date.now() + Math.random().toString(36).slice(2,6), text: text.trim() });
+    saveStore(); pub();
+  },
+  removeCustomTask: (tab, id) => {
+    state.customTasks[tab] = (state.customTasks[tab] || []).filter(t => t.id !== id);
+    saveStore(); pub();
+  },
 };
 
 
@@ -156,7 +172,7 @@ function compute() {
   if (!profile || !lastPeriodStart) return;
   const day = NE.dayOf(lastPeriodStart, profile.averageCycleLength);
   const y = new Date(); y.setDate(y.getDate()-1);
-  const yk = y.toISOString().split('T')[0];
+  const yk = localISO(y);
   const ylog = state.logs[yk];
   state.currentProfile = NE.prof(day, profile.averageCycleLength, ylog?.sleepQuality ?? 4);
   saveStore();
@@ -174,7 +190,15 @@ function initStore(id) {
 // ===== HELPERS =====
 const haptic = (t='light') => tg?.HapticFeedback?.impactOccurred?.(t);
 const notify = (t='success') => tg?.HapticFeedback?.notificationOccurred?.(t);
-const todayStr = () => new Date().toISOString().split('T')[0];
+// IMPORTANT: never use Date.toISOString() for local calendar dates — it converts to UTC
+// and shifts the date by a day near midnight in timezones ahead of UTC (e.g. UTC+3).
+function localISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+const todayStr = () => localISO(new Date());
 const isSameDay = (a, b) => a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 
 function Scrollable({ children, style }) {
@@ -219,7 +243,7 @@ function CustomDatePicker({ value, onSelect, onClose }) {
 
   const selectDay = (day) => {
     const d = new Date(year, month, day);
-    const iso = d.toISOString().split('T')[0];
+    const iso = localISO(d);
     haptic('medium');
     onSelect(iso);
     onClose();
@@ -478,21 +502,58 @@ function Dashboard({ onCheckIn }) {
 }
 
 
+function TaskRow({ id, text, checked, onToggle, onRemove }) {
+  return html`
+    <${Card} style="display:flex;align-items:center;gap:14px;padding:16px 18px;transition:transform 0.15s;opacity:${checked?0.55:1};"
+      onTouchStart=${e=>e.currentTarget.style.transform='scale(0.98)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
+    >
+      <button onClick=${()=>{haptic('medium');onToggle();}}
+        style="width:26px;height:26px;border-radius:9px;border:2.5px solid ${checked?theme.success:'var(--border)'};background:${checked?theme.success:'transparent'};display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:all 0.15s;padding:0;"
+      >${checked ? html`<span style="color:#0f1419;font-size:15px;font-weight:900;line-height:1;">✓</span>` : ''}</button>
+      <span style="font-size:14px;color:var(--text);font-weight:500;flex:1;text-decoration:${checked?'line-through':'none'};">${text}</span>
+      ${onRemove && html`<button onClick=${()=>{haptic();onRemove();}} style="background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:4px 6px;flex-shrink:0;">✕</button>`}
+    <//>
+  `;
+}
+
+function AddTaskInput({ onAdd }) {
+  const [val, setVal] = useState('');
+  const submit = () => { if (!val.trim()) return; onAdd(val); setVal(''); haptic('medium'); };
+  return html`
+    <div style="display:flex;gap:8px;">
+      <input value=${val} onInput=${e=>setVal(e.target.value)} onKeyDown=${e=>{if(e.key==='Enter')submit();}}
+        placeholder="Добавить своё..." 
+        style="flex:1;padding:14px 16px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;" />
+      <button onClick=${submit} style="padding:0 20px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:20px;font-weight:700;cursor:pointer;">+</button>
+    </div>
+  `;
+}
+
 function Planner() {
   const [tab, setTab] = useState('work');
   const [profile, setP] = useState(store.getState().currentProfile);
-  useEffect(() => store.sub(s => setP(s.currentProfile)), []);
+  const [checks, setChecks] = useState(store.getState().taskChecks);
+  const [custom, setCustom] = useState(store.getState().customTasks);
+  useEffect(() => store.sub(s => { setP(s.currentProfile); setChecks(s.taskChecks); setCustom(s.customTasks); }), []);
 
   if (!profile) return html`<div style="padding:40px 20px;color:var(--text2);text-align:center;">Загрузка...</div>`;
 
   const ph = profile.phase;
   const c = NE.pc(ph);
+  const date = todayStr();
   const tabs = [{k:'work',l:'💼 Работа'},{k:'body',l:'💪 Тело'},{k:'food',l:'🥗 Питание'}];
+
+  const isChecked = (t, id) => !!(checks[date]?.[t]?.[id]);
+  const toggle = (t, id) => store.toggleTaskCheck(date, t, id);
+
+  const builtinWork = {menstruation:['Ответить на отложенные письма','Обновить to-do','Провести ретроспективу','Организовать пространство'],follicular:['Запустить новый проект','Мозговой штурм','Изучить инструмент','Начать обучение'],ovulation:['Важные переговоры','Выступить на публике','Закрыть сделку','Нетворкинг'],luteal:['Завершить задачи','Аудит процессов','Написать документацию','Подготовить отчёты']}[ph];
+  const builtinSport = {menstruation:['Пилатес 20 мин','Йога Нидра','Растяжка','Прогулка 30 мин'],follicular:['Кроссфит WOD','Бег 5 км','Силовая','Танцы'],ovulation:['HIIT 15 мин','Боевые искусства','Командный спорт','Плавание'],luteal:['Йога для ПМС','Плавание','Пилатес','Медитация в движении']}[ph];
+  const builtinFood = {menstruation:[{n:'Говяжья печень',b:'Железо + B12'},{n:'Шпинат',b:'Фолиевая кислота'},{n:'Гранат',b:'Витамин C'},{n:'Тёплый бульон',b:'Уют и минералы'}],follicular:[{n:'Лосось',b:'Омега-3 + белок'},{n:'Брокколи',b:'Эстроген-детокс'},{n:'Кефир',b:'Пробиотики'},{n:'Авокадо',b:'Здоровые жиры'}],ovulation:[{n:'Помидоры',b:'Ликопен'},{n:'Орехи',b:'Цинк + селен'},{n:'Ягоды',b:'Антиоксиданты'},{n:'Оливковое масло',b:'Полифенолы'}],luteal:[{n:'Тёмный шоколад',b:'Магний'},{n:'Бананы',b:'Витамин B6'},{n:'Овсянка',b:'Сложные углеводы'},{n:'Чечевица',b:'Белок + железо'}]}[ph];
 
   return html`
     <${Scrollable} style="padding:28px 20px 120px;">
       <h1 style="font-size:28px;font-weight:800;margin-bottom:6px;letter-spacing:-0.02em;" class="anim">Планер</h1>
-      <p style="font-size:13px;color:var(--text2);margin-bottom:24px;font-weight:500;" class="anim">Адаптация под текущую фазу</p>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:24px;font-weight:500;" class="anim">Адаптация под текущую фазу — отмечай, что сделала, или добавляй своё</p>
 
       <div style="display:flex;gap:6px;padding:5px;border-radius:18px;background:var(--surface);border:1px solid var(--border);margin-bottom:28px;" class="anim">
         ${tabs.map(t => html`
@@ -510,15 +571,16 @@ function Planner() {
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${c};margin-bottom:8px;">Рекомендация фазы</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.work(ph)}</div>
             <//>
-            ${({menstruation:['Ответить на отложенные письма','Обновить to-do','Провести ретроспективу','Организовать пространство'],follicular:['Запустить новый проект','Мозговой штурм','Изучить инструмент','Начать обучение'],ovulation:['Важные переговоры','Выступить на публике','Закрыть сделку','Нетворкинг'],luteal:['Завершить задачи','Аудит процессов','Написать документацию','Подготовить отчёты']}[ph]).map((t,i) => html`
-              <${Card} key=${i} style="display:flex;align-items:center;gap:16px;padding:18px;transition:transform 0.15s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.98)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
-              >
-                <div style="width:28px;height:28px;border-radius:50%;border:2.5px solid ${c};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                  <div style="width:12px;height:12px;border-radius:50%;background:${c};box-shadow:0 0 10px ${c}50;" />
-                </div>
-                <span style="font-size:14px;color:var(--text);font-weight:500;">${t}</span>
-              <//>
+            ${builtinWork.map((t,i) => html`
+              <${TaskRow} key=${'work_'+ph+'_'+i} id=${'work_'+ph+'_'+i} text=${t}
+                checked=${isChecked('work','w_'+ph+'_'+i)} onToggle=${()=>toggle('work','w_'+ph+'_'+i)} />
             `)}
+            ${(custom.work||[]).map(ct => html`
+              <${TaskRow} key=${ct.id} id=${ct.id} text=${ct.text}
+                checked=${isChecked('work',ct.id)} onToggle=${()=>toggle('work',ct.id)}
+                onRemove=${()=>store.removeCustomTask('work', ct.id)} />
+            `)}
+            <${AddTaskInput} onAdd=${text=>store.addCustomTask('work', text)} />
           </div>
         `}
 
@@ -528,12 +590,16 @@ function Planner() {
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${c};margin-bottom:8px;">Спорт</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.sport(ph)}</div>
             <//>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              ${({menstruation:['Пилатес 20 мин','Йога Нидра','Растяжка','Прогулка 30 мин'],follicular:['Кроссфит WOD','Бег 5 км','Силовая','Танцы'],ovulation:['HIIT 15 мин','Боевые искусства','Командный спорт','Плавание'],luteal:['Йога для ПМС','Плавание','Пилатес','Медитация в движении']}[ph]).map((e,i) => html`
-                <${Card} key=${i} style="padding:18px;text-align:center;font-size:14px;color:var(--text);font-weight:500;transition:transform 0.15s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.96)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
-                >${e}<//>
-              `)}
-            </div>
+            ${builtinSport.map((t,i) => html`
+              <${TaskRow} key=${'sport_'+ph+'_'+i} id=${'sport_'+ph+'_'+i} text=${t}
+                checked=${isChecked('body','s_'+ph+'_'+i)} onToggle=${()=>toggle('body','s_'+ph+'_'+i)} />
+            `)}
+            ${(custom.body||[]).map(ct => html`
+              <${TaskRow} key=${ct.id} id=${ct.id} text=${ct.text}
+                checked=${isChecked('body',ct.id)} onToggle=${()=>toggle('body',ct.id)}
+                onRemove=${()=>store.removeCustomTask('body', ct.id)} />
+            `)}
+            <${AddTaskInput} onAdd=${text=>store.addCustomTask('body', text)} />
             <${Card} style="border-color:${theme.love}30;background:${theme.love}08;">
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${theme.love};margin-bottom:8px;">Интимность</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.intim(ph)}</div>
@@ -547,12 +613,16 @@ function Planner() {
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${c};margin-bottom:8px;">Питание фазы</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.food(ph)}</div>
             <//>
-            ${({menstruation:[{n:'Говяжья печень',b:'Железо + B12'},{n:'Шпинат',b:'Фолиевая кислота'},{n:'Гранат',b:'Витамин C'},{n:'Тёплый бульон',b:'Уют и минералы'}],follicular:[{n:'Лосось',b:'Омега-3 + белок'},{n:'Брокколи',b:'Эстроген-детокс'},{n:'Кефир',b:'Пробиотики'},{n:'Авокадо',b:'Здоровые жиры'}],ovulation:[{n:'Помидоры',b:'Ликопен'},{n:'Орехи',b:'Цинк + селен'},{n:'Ягоды',b:'Антиоксиданты'},{n:'Оливковое масло',b:'Полифенолы'}],luteal:[{n:'Тёмный шоколад',b:'Магний'},{n:'Бананы',b:'Витамин B6'},{n:'Овсянка',b:'Сложные углеводы'},{n:'Чечевица',b:'Белок + железо'}]}[ph]).map((f,i) => html`
-              <${Card} key=${i} style="display:flex;justify-content:space-between;align-items:center;padding:18px;">
-                <span style="font-size:15px;font-weight:700;color:var(--text);">${f.n}</span>
-                <span style="font-size:12px;color:var(--text2);background:var(--bg);padding:5px 12px;border-radius:10px;font-weight:500;">${f.b}</span>
-              <//>
+            ${builtinFood.map((f,i) => html`
+              <${TaskRow} key=${'food_'+ph+'_'+i} id=${'food_'+ph+'_'+i} text=${f.n+' — '+f.b}
+                checked=${isChecked('food','f_'+ph+'_'+i)} onToggle=${()=>toggle('food','f_'+ph+'_'+i)} />
             `)}
+            ${(custom.food||[]).map(ct => html`
+              <${TaskRow} key=${ct.id} id=${ct.id} text=${ct.text}
+                checked=${isChecked('food',ct.id)} onToggle=${()=>toggle('food',ct.id)}
+                onRemove=${()=>store.removeCustomTask('food', ct.id)} />
+            `)}
+            <${AddTaskInput} onAdd=${text=>store.addCustomTask('food', text)} />
           </div>
         `}
       </div>
@@ -661,7 +731,7 @@ function Calendar() {
             ${days.map((d, i) => {
               if (!d) return html`<div key=${i} />`;
               const dateObj = new Date(year, month, d);
-              const iso = dateObj.toISOString().split('T')[0];
+              const iso = localISO(dateObj);
               const log = logs[iso];
               const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
               const ph = dayNum ? NE.phase(dayNum, cycleLength) : null;
@@ -699,8 +769,8 @@ function Calendar() {
           <div style="display:flex;justify-content:center;gap:16px;margin-top:16px;flex-wrap:wrap;opacity:0.7;">
             <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};" /><span style="font-size:10px;color:var(--text2);">Менструация</span></div>
             <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" /><span style="font-size:10px;color:var(--text2);">Симптомы</span></div>
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:var(--surface);border:1px solid var(--border);" /><span style="font-size:10px;color:var(--text2);">Прогноз</span></div>
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:var(--surface);border:1px solid var(--accent);" /><span style="font-size:10px;color:var(--text2);">Факт</span></div>
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:${theme.accent}12;border:1px solid var(--border);" /><span style="font-size:10px;color:var(--text2);">Прогноз</span></div>
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:${theme.accent}30;border:1.5px solid var(--accent);" /><span style="font-size:10px;color:var(--text2);">Факт</span></div>
           </div>
         <//>
       `}
