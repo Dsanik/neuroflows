@@ -1,4 +1,3 @@
-
 import { render } from 'preact';
 import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { html } from 'htm/preact';
@@ -101,7 +100,7 @@ const NE = {
   getProgesterone(d, L=28) { const ov=L-14; return d<=ov ? 0.05 : Math.max(0, Math.sin((Math.PI*(d-ov))/14)); },
   getTestosterone(d, L=28) { const ov=L-14; return Math.exp(-Math.pow(d-ov,2)/4); },
   cns(e, p, s=4) { let b=e*0.6-p*0.3+0.5; return Math.min(100, Math.max(0, b*50+s*10)); },
-  phase(d, L=28) { if(d<=5)return'menstruation'; if(d<=13)return'follicular'; if(d<=16)return'ovulation'; return'luteal'; },
+  phase(d, L=28) { const ov=L-14; if(d<=5)return'menstruation'; if(d<=ov-1)return'follicular'; if(d<=ov+2)return'ovulation'; return'luteal'; },
   dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=(diff%L)+1; return day>0?day:1; },
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#10B981',follicular:'#F59E0B',ovulation:'#EF4444',luteal:'#6366F1'}[ph]; },
