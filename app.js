@@ -1,4 +1,3 @@
-
 import { render } from 'preact';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { html } from 'htm/preact';
@@ -422,9 +421,10 @@ function TaskRow({ id, text, checked, onToggle, onRemove }) {
 function AddTaskInput({ onAdd }) {
   const [val, setVal] = useState('');
   const submit = () => { if (!val.trim()) return; onAdd(val); setVal(''); haptic('medium'); };
+  const handleInput = e => setVal(e.target.value);
   return html`
     <div style="display:flex;gap:8px;">
-      <input value=${val} onInput=${e=>setVal(e.target.value)} onKeyDown=${e=>{if(e.key==='Enter')submit();}} placeholder="Добавить своё..." style="flex:1;padding:14px 16px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;" />
+      <input value=${val} onInput=${handleInput} onChange=${handleInput} onKeyDown=${e=>{if(e.key==='Enter')submit();}} placeholder="Добавить своё..." style="flex:1;padding:14px 16px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;-webkit-appearance:none;" />
       <button onClick=${submit} style="padding:0 20px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:20px;font-weight:700;cursor:pointer;">+</button>
     </div>
   `;
@@ -774,7 +774,7 @@ function CheckIn({ onClose }) {
             ${slider('Энергия','energyLevel')}${slider('Фокус','focusLevel')}${slider('Тревожность (кортизол)','anxietyLevel')}${slider('Качество сна','sleepQuality')}
             <div style="margin-top:12px;"><span style="font-size:14px;color:var(--text2);display:block;margin-bottom:14px;font-weight:600;">Настроение</span>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
-                ${moods.map(m=>html`<button key=${m.k} onClick=${()=>{haptic('medium');upd({mood:m.k});}} style="padding:16px 8px;border-radius:18px;border:2px solid ${log.mood===m.k?'var(--accent)':'var(--border)'};background:${log.mood===m.k?'var(--accent-soft)':'var(--surface)'};color:var(--text);font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;gap:8px;transform:${log.mood===m.k?'scale(1.02)':'scale(1)'};box-shadow:${log.mood===m.k?`0 4px 16px ${theme.accentGlow}`:'none'};" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=log.mood===m.k?'scale(1.02)':'scale(1)'}"><span style="font-size:32px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.1));">${m.e}</span><span style="font-weight:600;">${m.l}</span></button>`)}
+                ${moods.map(m=>html`<div key=${m.k} onClick=${()=>{haptic('medium');upd({mood:m.k});}} role="button" tabindex="0" style="padding:16px 8px;border-radius:18px;border:2px solid ${log.mood===m.k?'var(--accent)':'var(--border)'};background:${log.mood===m.k?'var(--accent-soft)':'var(--surface)'};color:var(--text);font-size:12px;cursor:pointer;transition:all 0.2s;transform:${log.mood===m.k?'scale(1.02)':'scale(1)'};box-shadow:${log.mood===m.k?`0 4px 16px ${theme.accentGlow}`:'none'};text-align:center;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=log.mood===m.k?'scale(1.02)':'scale(1)'}"><div style="font-size:32px;margin-bottom:8px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.1));">${m.e}</div><div style="font-weight:600;">${m.l}</div></div>`)}
               </div>
             </div>
           </div>
@@ -784,7 +784,7 @@ function CheckIn({ onClose }) {
             <h3 style="font-size:22px;font-weight:800;text-align:center;margin-bottom:32px;color:var(--text);letter-spacing:-0.02em;">Интимность и тело</h3>
             <div style="margin-bottom:32px;"><div style="font-size:14px;color:var(--text2);text-align:center;margin-bottom:18px;font-weight:600;">Уровень либидо</div>
               <div style="display:flex;justify-content:space-between;align-items:flex-end;height:110px;gap:8px;">
-                ${[0,1,2,3,4].map(lvl=>html`<button key=${lvl} onClick=${()=>{haptic('medium');upd({libidoLevel:lvl});}} style="flex:1;border-radius:16px;border:none;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:12px;height:${32+lvl*19}%;background:${log.libidoLevel>=lvl?`${theme.love}18`:'var(--surface)'};border:2px solid ${log.libidoLevel>=lvl?`${theme.love}50`:'var(--border)'};cursor:pointer;transition:all 0.25s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.96)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="color:${log.libidoLevel>=lvl?theme.love:'var(--text2)'};transition:all 0.2s;"><path d="M12 2L15 9L22 12L15 15L12 22L9 15L2 12L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill=${log.libidoLevel>=lvl?'currentColor':'none'} /></svg></button>`)}
+                ${[0,1,2,3,4].map(lvl=>html`<div key=${lvl} onClick=${()=>{haptic('medium');upd({libidoLevel:lvl});}} role="button" tabindex="0" style="flex:1;border-radius:16px;border:2px solid ${log.libidoLevel>=lvl?`${theme.love}50`:'var(--border)'};display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:12px;height:${32+lvl*19}%;background:${log.libidoLevel>=lvl?`${theme.love}18`:'var(--surface)'};cursor:pointer;transition:all 0.25s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.96)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="color:${log.libidoLevel>=lvl?theme.love:'var(--text2)'};transition:all 0.2s;margin-bottom:8px;"><path d="M12 2L15 9L22 12L15 15L12 22L9 15L2 12L9 9L12 2Z" stroke="currentColor" stroke-width="1.5" fill=${log.libidoLevel>=lvl?'currentColor':'none'} /></svg></div>`)}
               </div>
               <div style="text-align:center;font-size:14px;color:var(--text2);margin-top:12px;font-weight:700;">${['Спит','Тихо','Возможно','Желание','На пределе'][log.libidoLevel]}</div>
             </div>
@@ -792,7 +792,7 @@ function CheckIn({ onClose }) {
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                 ${[{k:'none',l:'Нет',i:'🌙'},{k:'solo',l:'Соло',i:'✨'},{k:'partner',l:'С партнёром',i:'🔮'}].map(opt=>{
                   const isSelected = (opt.k==='none'&&!log.intimacy.occurred)||(opt.k!=='none'&&log.intimacy.occurred&&log.intimacy.type===opt.k);
-                  return html`<button key=${opt.k} onClick=${()=>{haptic('medium');upd({intimacy:{...log.intimacy,occurred:opt.k!=='none',type:opt.k}});}} style="padding:18px;border-radius:18px;border:2px solid ${isSelected?`${theme.love}55`:'var(--border)'};background:${isSelected?`${theme.love}10`:'var(--surface)'};color:var(--text);font-size:14px;font-weight:700;text-align:center;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;gap:8px;transform:${isSelected?'scale(1.02)':'scale(1)'};box-shadow:${isSelected?`0 4px 16px ${theme.love}25`:'none'};" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=isSelected?'scale(1.02)':'scale(1)'}"><span style="font-size:28px;">${opt.i}</span><span>${opt.l}</span></button>`;
+                  return html`<div key=${opt.k} onClick=${()=>{haptic('medium');upd({intimacy:{...log.intimacy,occurred:opt.k!=='none',type:opt.k}});}} role="button" tabindex="0" style="padding:18px;border-radius:18px;border:2px solid ${isSelected?`${theme.love}55`:'var(--border)'};background:${isSelected?`${theme.love}10`:'var(--surface)'};color:var(--text);font-size:14px;font-weight:700;text-align:center;cursor:pointer;transition:all 0.2s;transform:${isSelected?'scale(1.02)':'scale(1)'};box-shadow:${isSelected?`0 4px 16px ${theme.love}25`:'none'};" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=isSelected?'scale(1.02)':'scale(1)'}"><div style="font-size:28px;margin-bottom:8px;">${opt.i}</div><div>${opt.l}</div></div>`;
                 })}
               </div>
             </div>
@@ -819,7 +819,7 @@ function CheckIn({ onClose }) {
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;"><span style="font-size:14px;color:var(--text2);font-weight:600;">Симптомы</span>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-                ${symptoms.map(s=>html`<button key=${s.k} onClick=${()=>toggleSym(s.k)} style="padding:14px;border-radius:16px;border:2px solid ${log.symptoms?.includes(s.k)?'var(--accent)':'var(--border)'};background:${log.symptoms?.includes(s.k)?'var(--accent-soft)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;gap:6px;transform:${log.symptoms?.includes(s.k)?'scale(1.02)':'scale(1)'};box-shadow:${log.symptoms?.includes(s.k)?`0 4px 14px ${theme.accentGlow}`:'none'};" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=log.symptoms?.includes(s.k)?'scale(1.02)':'scale(1)'}"><span style="font-size:24px;">${s.i}</span><span style="font-weight:600;">${s.l}</span></button>`)}
+                ${symptoms.map(s=>html`<div key=${s.k} onClick=${()=>toggleSym(s.k)} role="button" tabindex="0" style="padding:14px;border-radius:16px;border:2px solid ${log.symptoms?.includes(s.k)?'var(--accent)':'var(--border)'};background:${log.symptoms?.includes(s.k)?'var(--accent-soft)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer;transition:all 0.2s;transform:${log.symptoms?.includes(s.k)?'scale(1.02)':'scale(1)'};box-shadow:${log.symptoms?.includes(s.k)?`0 4px 14px ${theme.accentGlow}`:'none'};text-align:center;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.95)'} onTouchEnd=${e=>e.currentTarget.style.transform=log.symptoms?.includes(s.k)?'scale(1.02)':'scale(1)'}"><div style="font-size:24px;margin-bottom:6px;">${s.i}</div><div style="font-weight:600;">${s.l}</div></div>`)}
               </div>
             </div>
           </div>
