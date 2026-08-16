@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.16-4'; // bump this on every delivered fix so testers can confirm which build they're on
+const APP_BUILD = '2026.08.16-5'; // bump this on every delivered fix so testers can confirm which build they're on
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
 let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false, taskChecks: {}, customTasks: { work: [], body: [], food: [] } };
@@ -138,8 +138,6 @@ const NE = {
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#EF4444',follicular:'#EC4899',ovulation:'#38BDF8',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
-  fc(tier) { return {low:'#86EFAC',medium:'#4ADE80',high:'#10B981'}[tier]; },
-  fn(tier) { return {low:'Шанс: низкий',medium:'Шанс: средний',high:'Шанс: высокий'}[tier]; },
   insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
@@ -755,26 +753,26 @@ function Calendar() {
               const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
               const ph = dayNum ? NE.phase(dayNum, cycleLength) : null;
               const fert = dayNum ? NE.fertility(dayNum, cycleLength) : null;
+              const fertLevel = {low:1,medium:2,high:3}[fert] || 0;
               const color = ph ? NE.pc(ph) : 'var(--text2)';
               const isToday = isSameDay(dateObj, today);
               const isFuture = dateObj > today;
-              const hasLog = !!log;
-              const isPeriod = log?.isPeriod;
               const hasSymptoms = log?.symptoms?.length > 0;
 
               return html`
                 <button key=${i} onClick=${()=>{haptic('medium');setSelectedDate(iso);}}
-                  style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?(color+'60'):'transparent'};background:${hasLog?(color+'20'):(color+'08')};opacity:${isFuture?0.5:1};color:var(--text);cursor:pointer;padding:0;"
+                  style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?(color+'60'):'transparent'};background:${color}10;opacity:${isFuture?0.5:1};color:var(--text);cursor:pointer;padding:0;"
                   onTouchStart=${e=>e.currentTarget.style.transform='scale(0.92)'}
                   onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
                 >
                   <span style="font-size:13px;font-weight:800;color:${color};">${d}</span>
                   ${dayNum && html`<span style="font-size:8px;color:var(--text2);margin-top:2px;opacity:0.7;font-weight:500;">${dayNum}д</span>`}
-                  <div style="display:flex;gap:2px;margin-top:3px;height:5px;align-items:center;">
-                    ${isPeriod && html`<div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};box-shadow:0 0 4px ${theme.danger}80;" />`}
-                    ${hasSymptoms && html`<div style="width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px ${theme.accentGlow};" />`}
-                  </div>
-                  ${fert && html`<div style="position:absolute;bottom:3px;left:8px;right:8px;height:3px;border-radius:2px;background:${NE.fc(fert)};box-shadow:0 0 4px ${NE.fc(fert)}70;" />`}
+                  ${hasSymptoms && html`<div style="width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px ${theme.accentGlow};margin-top:3px;" />`}
+                  ${fertLevel > 0 && html`
+                    <div style="position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:2px;">
+                      ${[1,2,3].map(n => html`<div key=${n} style="width:6px;height:3px;border-radius:1px;background:${n<=fertLevel?'#10B981':'var(--border)'};" />`)}
+                    </div>
+                  `}
                 </button>
               `;
             })}
@@ -787,19 +785,14 @@ function Calendar() {
               </div>
             `)}
           </div>
-          <div style="display:flex;justify-content:center;gap:14px;margin-top:14px;flex-wrap:wrap;">
-            ${['low','medium','high'].map(t => html`
-              <div key=${t} style="display:flex;align-items:center;gap:6px;">
-                <div style="width:16px;height:3px;border-radius:2px;background:${NE.fc(t)};" />
-                <span style="font-size:10px;color:var(--text2);font-weight:500;">${NE.fn(t)}</span>
-              </div>
-            `)}
+          <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div style="display:flex;gap:2px;">${[1,2,3].map(n => html`<div key=${n} style="width:6px;height:3px;border-radius:1px;background:#10B981;" />`)}</div>
+              <span style="font-size:10px;color:var(--text2);font-weight:500;">Шанс зачатия (заполненность = выше)</span>
+            </div>
           </div>
-          <div style="display:flex;justify-content:center;gap:16px;margin-top:16px;flex-wrap:wrap;opacity:0.7;">
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};" /><span style="font-size:10px;color:var(--text2);">Менструация</span></div>
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" /><span style="font-size:10px;color:var(--text2);">Симптомы</span></div>
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:${theme.accent}12;border:1px solid var(--border);" /><span style="font-size:10px;color:var(--text2);">Прогноз</span></div>
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:3px;background:${theme.accent}30;border:1.5px solid var(--accent);" /><span style="font-size:10px;color:var(--text2);">Факт</span></div>
+          <div style="display:flex;justify-content:center;gap:16px;margin-top:14px;flex-wrap:wrap;opacity:0.7;">
+            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" /><span style="font-size:10px;color:var(--text2);">Есть симптомы в этот день</span></div>
           </div>
         <//>
       `}
