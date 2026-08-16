@@ -1,61 +1,106 @@
 from flask import Flask, request, jsonify
 from datetime import datetime
-import json, os, requests
+import json, os, requests, urllib.parse
 
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', '')
-DATA_FILE = '/tmp/users.json'
 
-def load_data():
+# These two are set automatically once you attach a Vercel KV store to this
+# project (Vercel Dashboard -> Storage -> Create Database -> KV). Do NOT use
+# /tmp for persistence here — serverless function instances are ephemeral and
+# /tmp is not guaranteed to survive between invocations, so data written by
+# /api/register can silently vanish before /api/cron ever reads it.
+KV_URL = os.environ.get('KV_REST_API_URL', '')
+KV_TOKEN = os.environ.get('KV_REST_API_TOKEN', '')
+
+
+def _kv_headers():
+    return {'Authorization': f'Bearer {KV_TOKEN}'}
+
+
+def kv_set(key, value):
+    """Store a JSON-serializable value under key."""
+    encoded = urllib.parse.quote(json.dumps(value), safe='')
+    r = requests.get(f'{KV_URL}/set/{key}/{encoded}', headers=_kv_headers(), timeout=10)
+    return r.ok
+
+
+def kv_get(key):
+    """Retrieve and JSON-decode a value, or None if missing/unset."""
+    r = requests.get(f'{KV_URL}/get/{key}', headers=_kv_headers(), timeout=10)
+    result = r.json().get('result')
+    if not result:
+        return None
     try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
+        return json.loads(result)
+    except (TypeError, ValueError):
+        return None
 
-def save_data(data):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f)
+
+def kv_sadd(key, member):
+    encoded = urllib.parse.quote(str(member), safe='')
+    requests.get(f'{KV_URL}/sadd/{key}/{encoded}', headers=_kv_headers(), timeout=10)
+
+
+def kv_smembers(key):
+    r = requests.get(f'{KV_URL}/smembers/{key}', headers=_kv_headers(), timeout=10)
+    return r.json().get('result', []) or []
+
 
 @app.route('/api/register', methods=['POST'])
 def register():
+    if not KV_URL or not KV_TOKEN:
+        return jsonify({'error': 'KV storage not configured — attach a Vercel KV store to this project'}), 500
     body = request.get_json() or {}
     chat_id = body.get('chat_id')
     settings = body.get('settings', {})
     if not chat_id:
         return jsonify({'error': 'chat_id required'}), 400
-    data = load_data()
-    data[str(chat_id)] = {
+    chat_id = str(chat_id)
+    kv_set(f'user:{chat_id}', {
         'settings': settings,
-        'registered_at': datetime.now().isoformat()
-    }
-    save_data(data)
+        'lastPeriodStart': body.get('lastPeriodStart'),
+        'profile': body.get('profile'),
+        'registered_at': datetime.now().isoformat(),
+    })
+    kv_sadd('users:all', chat_id)
     return jsonify({'ok': True})
+
 
 @app.route('/api/cron', methods=['GET'])
 def cron():
     auth = request.headers.get('Authorization', '')
-    if auth != f'Bearer {CRON_SECRET}':
+    if not CRON_SECRET or auth != f'Bearer {CRON_SECRET}':
         return jsonify({'error': 'Unauthorized'}), 401
-    data = load_data()
+    if not KV_URL or not KV_TOKEN:
+        return jsonify({'error': 'KV storage not configured'}), 500
+
+    chat_ids = kv_smembers('users:all')
     sent = 0
-    for chat_id, user in data.items():
+    for chat_id in chat_ids:
+        user = kv_get(f'user:{chat_id}')
+        if not user:
+            continue
         settings = user.get('settings', {})
         if settings.get('periodReminder'):
             msg = "🔔 NeuroFlow: Не забудьте отметить самочувствие!"
             try:
-                requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
-                    json={'chat_id': chat_id, 'text': msg,
-                          'reply_markup': {'inline_keyboard': [[{
-                              "text": "Открыть NeuroFlow",
-                              "web_app": {"url": "https://dsanik.github.io/neuroflows/"}
-                          }]]}}, timeout=10)
+                requests.post(
+                    f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
+                    json={
+                        'chat_id': chat_id, 'text': msg,
+                        'reply_markup': {'inline_keyboard': [[{
+                            "text": "Открыть NeuroFlow",
+                            "web_app": {"url": "https://dsanik.github.io/neuroflows/"}
+                        }]]}
+                    }, timeout=10)
                 sent += 1
             except Exception as e:
                 print(f'Failed to send to {chat_id}: {e}')
-    return jsonify({'ok': True, 'sent': sent})
+    return jsonify({'ok': True, 'sent': sent, 'total_users': len(chat_ids)})
+
 
 @app.route('/api/notify', methods=['POST'])
 def notify():
@@ -65,7 +110,8 @@ def notify():
     if not chat_id or not text:
         return jsonify({'error': 'chat_id and text required'}), 400
     try:
-        r = requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
+        r = requests.post(
+            f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
             json={'chat_id': chat_id, 'text': text}, timeout=10)
         return jsonify({'ok': r.status_code == 200})
     except Exception as e:
