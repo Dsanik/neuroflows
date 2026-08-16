@@ -15,7 +15,7 @@ const theme = {
   border: isDark ? 'rgba(148,163,184,0.12)' : 'rgba(148,163,184,0.2)',
   success: '#34d399', warning: '#fbbf24', danger: '#f87171', love: '#f472b6', purple: '#a78bfa',
 };
-const BACKEND_URL = ''; // <-- ВСТАВЬТЕ URL вашего бэкенда (например: 'https://your-bot.vercel.app')
+const BACKEND_URL = 'https://neuroflows-eta.vercel.app/'; // <-- ВСТАВЬТЕ URL вашего бэкенда (например: 'https://your-bot.vercel.app')
 if (tg) { try { tg.ready(); tg.expand(); tg.enableClosingConfirmation();
   const r = document.documentElement.style;
   r.setProperty('--bg', theme.bg); r.setProperty('--bg2', theme.bg2); r.setProperty('--surface', theme.surface);
