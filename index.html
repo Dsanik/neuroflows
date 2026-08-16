@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <meta name="theme-color" content="#0f1419" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<link rel="manifest" href="manifest.json" />
+<script type="text/javascript" nonce="9872961abcc44c2f84eb73a0a57" src="//local.adguard.org?ts=1786892819594&amp;type=content-script&amp;dmn=prod-chat-kimi.tos-cn-beijing.volces.com&amp;url=https%3A%2F%2Fprod-chat-kimi.tos-cn-beijing.volces.com%2Fkimi-fs%2Fokc%2Fmlnozrxjiwqj2%2Foutput%2Findex.html%3FX-Tos-Algorithm%3DTOS4-HMAC-SHA256%26X-Tos-Credential%3DAKLTYTJlNjgwMjY2ZDBkNDFiYmI5YWNiZDBlZmFmYjIzZTA%252F20260816%252Fcn-beijing%252Ftos%252Frequest%26X-Tos-Date%3D20260816T151804Z%26X-Tos-Expires%3D518400%26X-Tos-Signature%3D7104e0e49594cc768523f9f4a6a2dc35dab7b840f38aec5155a4a17c079d2c08%26X-Tos-SignedHeaders%3Dhost%26response-content-disposition%3Dattachment%253B%2Bfilename%252A%253DUTF-8%2527%2527index.html&amp;app=com.android.chrome&amp;css=3&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=0"></script>
 <link rel="apple-touch-icon" href="icon-192.png" />
 <title>NeuroFlow</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -55,10 +55,11 @@
 "htm/preact":"https://esm.sh/htm@3.1.1/preact?external=preact"
 }}
 </script>
+<base target="_blank">
 </head>
 <body>
 <div id="root"></div>
-<script type="module" src="./app.js?v=2026.08.16-final"></script>
+<script type="module" src="./app.js?v=2026.08.16-fix1"></script>
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
