@@ -58,6 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
+const APP_BUILD = '2026.08.16-3'; // bump this on every delivered fix so testers can confirm which build they're on
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
 let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false, taskChecks: {}, customTasks: { work: [], body: [], food: [] } };
@@ -126,7 +127,7 @@ const NE = {
   phase(d, L=28) { const ov=L-14; if(d<=5)return'menstruation'; if(d<=ov-1)return'follicular'; if(d<=ov+2)return'ovulation'; return'luteal'; },
   dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=(diff%L)+1; return day>0?day:1; },
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
-  pc(ph) { return {menstruation:'#10B981',follicular:'#F59E0B',ovulation:'#EF4444',luteal:'#6366F1'}[ph]; },
+  pc(ph) { return {menstruation:'#EF4444',follicular:'#EC4899',ovulation:'#38BDF8',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
   insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
@@ -813,6 +814,7 @@ function Calendar() {
           }} style="background:none;border:none;color:${theme.danger};font-size:13px;font-weight:600;padding:10px;cursor:pointer;opacity:0.8;">
             Сбросить все данные приложения
           </button>
+          <div style="font-size:10px;color:var(--text2);opacity:0.5;margin-top:4px;">build ${APP_BUILD}</div>
         </div>
       `}
 
