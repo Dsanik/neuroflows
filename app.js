@@ -58,10 +58,23 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.16-5'; // bump this on every delivered fix so testers can confirm which build they're on
+const APP_BUILD = '2026.08.16-7'; // bump this on every delivered fix so testers can confirm which build they're on
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
-let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false, taskChecks: {}, customTasks: { work: [], body: [], food: [] } };
+const DEFAULT_PALETTE = {menstruation:'#EF4444',follicular:'#EC4899',fertile:'#FBBF24',ovulation:'#38BDF8',luteal:'#6366F1',pms:'#A8A29E'};
+const PRESETS = {
+  default: { name: 'Стандартная', ...DEFAULT_PALETTE },
+  warm: { name: 'Тёплая', menstruation:'#F87171', follicular:'#FB923C', fertile:'#FBBF24', ovulation:'#FACC15', luteal:'#F59E0B', pms:'#A8A29E' },
+  cool: { name: 'Холодная', menstruation:'#F43F5E', follicular:'#06B6D4', fertile:'#22D3EE', ovulation:'#3B82F6', luteal:'#8B5CF6', pms:'#94A3B8' },
+  pastel: { name: 'Пастельная', menstruation:'#FDA4AF', follicular:'#F0ABFC', fertile:'#FDE68A', ovulation:'#7DD3FC', luteal:'#C4B5FD', pms:'#D6D3D1' },
+};
+let state = {
+  profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false,
+  taskChecks: {}, customTasks: { work: [], body: [], food: [] },
+  palette: { ...DEFAULT_PALETTE }, paletteName: 'default',
+  notifSettings: { periodReminder: 3, ovulationAlert: true, pmsAlert: true, time: '09:00' },
+  coachMarksSeen: {},
+};
 
 // Migration from v1 to v2
 const V1_KEY = 'nf_v1';
@@ -88,7 +101,22 @@ const store = {
   sub: cb => { subs.push(cb); return () => { subs = subs.filter(c => c !== cb); }; },
   setProfile: p => { state.profile = p; saveStore(); pub(); },
   setLps: d => { state.lastPeriodStart = d; saveStore(); compute(); pub(); },
-  addLog: log => { state.logs[log.date] = log; recalcAverageCycle(); saveStore(); compute(); pub(); },
+  addLog: log => {
+    const { profile, lastPeriodStart } = state;
+    if (log.isPeriod && profile && lastPeriodStart) {
+      const stMs = new Date(lastPeriodStart + 'T00:00:00').getTime();
+      const logMs = new Date(log.date + 'T00:00:00').getTime();
+      const rawDay = Math.floor((logMs - stMs) / 86400000) + 1;
+      // If this bleeding day is beyond the currently expected period window (whether the
+      // period is on time, early, or delayed), treat it as the start of a new cycle.
+      if (rawDay > (profile.averagePeriodLength || 5)) {
+        state.lastPeriodStart = log.date;
+      }
+    }
+    state.logs[log.date] = log;
+    recalcAverageCycle();
+    saveStore(); compute(); pub();
+  },
   setDraft: log => { state.draftLog = log; saveStore(); pub(); },
   clearDraft: () => { state.draftLog = null; saveStore(); pub(); },
   markTutorial: () => { state.tutorialSeen = true; localStorage.setItem(TUTORIAL_KEY, 'true'); pub(); },
@@ -115,6 +143,17 @@ const store = {
     state.customTasks = { ...state.customTasks, [tab]: (state.customTasks[tab] || []).filter(t => t.id !== id) };
     saveStore(); pub();
   },
+  setPalette: (palette, presetName='custom') => { state.palette = { ...palette }; state.paletteName = presetName; saveStore(); pub(); },
+  resetPalette: () => { state.palette = { ...DEFAULT_PALETTE }; state.paletteName = 'default'; saveStore(); pub(); },
+  setNotifSettings: s => { state.notifSettings = { ...state.notifSettings, ...s }; saveStore(); pub(); },
+  markCoachMark: id => { state.coachMarksSeen = { ...state.coachMarksSeen, [id]: true }; saveStore(); pub(); },
+  exportCSV: () => {
+    const rows = [['date','isPeriod','symptoms','energyLevel','focusLevel','anxietyLevel','sleepQuality','mood','cervicalMucus']];
+    Object.values(state.logs).sort((a,b)=>a.date<b.date?-1:1).forEach(l => {
+      rows.push([l.date, l.isPeriod?'1':'0', (l.symptoms||[]).join(';'), l.energyLevel??'', l.focusLevel??'', l.anxietyLevel??'', l.sleepQuality??'', l.mood??'', l.cervicalMucus??'']);
+    });
+    return rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  },
 };
 
 
@@ -134,10 +173,26 @@ const NE = {
     if (daysBefore <= 3) return 'medium';
     return 'low';
   },
-  dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=(diff%L)+1; return day>0?day:1; },
+  dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=diff+1; return day>0?day:1; },
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#EF4444',follicular:'#EC4899',ovulation:'#38BDF8',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
+  // ===== 6-category display model — for calendar visualization only. =====
+  // The 4-phase biological model above (phase/pc/pn) stays the source of truth for
+  // hormones, dashboard, and planner. This just splits "фолликулярная" and "лютеиновая"
+  // visually into fertile-window / PMS sub-ranges so the calendar can show them as their
+  // own colors, per the reference concept doc.
+  dcat(d, L=28) {
+    const ov = L - 14;
+    const ph = this.phase(d, L);
+    if (ph === 'menstruation' || ph === 'ovulation') return ph;
+    const fert = this.fertility(d, L);
+    if (fert && d !== ov) return 'fertile';
+    if (ph === 'luteal' && d >= L - 3 && d <= L) return 'pms';
+    return ph; // follicular or luteal (outside pms window)
+  },
+  dc(cat) { return (state.palette && state.palette[cat]) || DEFAULT_PALETTE[cat]; },
+  dn(cat) { return {menstruation:'Менструация',follicular:'Фолликулярная',fertile:'Фертильное окно',ovulation:'Овуляция',luteal:'Лютеиновая',pms:'ПМС'}[cat]; },
   insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
@@ -395,31 +450,25 @@ function Onboarding() {
         </div>
 
         <${Card}>
-          <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:12px;">
-            <span style="color:var(--text2);font-weight:500;">Длина цикла</span>
-            <span style="font-weight:700;color:var(--accent);font-size:15px;">${cycle} дней</span>
+          <div style="font-size:14px;color:var(--text2);font-weight:500;margin-bottom:14px;">Длина цикла — обычно 26–30 дней</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:24px;">
+            <button onClick=${()=>{haptic('light');setCycle(Math.max(21,cycle-1));}}
+              style="width:48px;height:48px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:22px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+            <span style="font-size:32px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;min-width:64px;text-align:center;">${cycle}</span>
+            <button onClick=${()=>{haptic('light');setCycle(Math.min(38,cycle+1));}}
+              style="width:48px;height:48px;border-radius:16px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:22px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
           </div>
-          <input type="range" min="21" max="35" value=${cycle} onInput=${e=>setCycle(+e.target.value)} 
-            style="width:100%;height:6px;border-radius:999px;background:var(--surface-hover);-webkit-appearance:none;appearance:none;outline:none;"
-          />
-          <style>
-            input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 16px var(--accent-glow);border:3px solid var(--bg2);margin-top:-9px;}
-            input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(to right,var(--accent) ${(cycle/35)*100}%,var(--surface-hover) ${(cycle/35)*100}%);}
-          </style>
+          ${(cycle<21||cycle>38) && html`<div style="margin-top:12px;font-size:12px;color:${theme.danger};text-align:center;">Нестандартный цикл. Рекомендуем проконсультироваться с гинекологом</div>`}
         <//>
 
         <${Card}>
-          <div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:12px;">
-            <span style="color:var(--text2);font-weight:500;">Длина периода</span>
-            <span style="font-weight:700;color:var(--accent);font-size:15px;">${period} дней</span>
+          <div style="font-size:14px;color:var(--text2);font-weight:500;margin-bottom:14px;">Длительность кровотечения — обычно 3–7 дней</div>
+          <div style="display:flex;gap:6px;">
+            ${[3,4,5,6,7,8].map(n => html`
+              <button key=${n} onClick=${()=>{haptic('light');setPeriod(n);}}
+                style="flex:1;height:44px;border-radius:12px;border:1.5px solid ${period===n?'var(--accent)':'var(--border)'};background:${period===n?'var(--accent)':'var(--surface-hover)'};color:${period===n?'#fff':'var(--text)'};font-size:15px;font-weight:700;cursor:pointer;transition:all 0.15s;">${n}</button>
+            `)}
           </div>
-          <input type="range" min="2" max="8" value=${period} onInput=${e=>setPeriod(+e.target.value)} 
-            style="width:100%;height:6px;border-radius:999px;background:var(--surface-hover);-webkit-appearance:none;appearance:none;outline:none;"
-          />
-          <style>
-            input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 16px var(--accent-glow);border:3px solid var(--bg2);margin-top:-9px;}
-            input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(to right,var(--accent) ${(period/8)*100}%,var(--surface-hover) ${(period/8)*100}%);}
-          </style>
         <//>
       </div>
 
@@ -443,7 +492,8 @@ function Dashboard({ onCheckIn }) {
   const circ = 2 * Math.PI * 90;
   const profileState = store.getState().profile;
   const cycleLen = profileState?.averageCycleLength || 28;
-  const offset = circ - (profile.dayOfCycle / cycleLen) * circ;
+  const offset = circ - (Math.min(profile.dayOfCycle, cycleLen) / cycleLen) * circ;
+  const delayDays = profile.dayOfCycle - cycleLen;
 
   return html`
     <${Scrollable} style="padding:28px 20px 120px;">
@@ -480,6 +530,18 @@ function Dashboard({ onCheckIn }) {
           <div style="font-size:11px;color:var(--text2);margin-top:8px;opacity:0.7;font-weight:500;background:var(--surface);padding:4px 12px;border-radius:20px;border:1px solid var(--border);">ЦНС: ${Math.round(profile.cnsCapacity)}%</div>
         </div>
       </div>
+
+      ${delayDays > 0 && html`
+        <${Card} style="margin-bottom:18px;background:${theme.danger}10;border-color:${theme.danger}30;" class="anim">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-size:28px;">⏳</div>
+            <div>
+              <div style="font-size:15px;font-weight:800;color:${theme.danger};">Задержка ${delayDays} ${delayDays===1?'день':delayDays<5?'дня':'дней'}</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:2px;">Менструация не началась в ожидаемый срок. Как только отметишь её в чек-ине — отсчёт цикла пересчитается автоматически.</div>
+            </div>
+          </div>
+        <//>
+      `}
 
       <${Card} style="margin-bottom:18px;" class="anim">
         <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:20px;">Уровень гормонов</div>
@@ -691,6 +753,21 @@ function DayDetailModal({ date, dayData, onClose }) {
   `;
 }
 
+function CoachMark({ id, text, onDismiss }) {
+  const [seen] = useState(store.getState().coachMarksSeen);
+  if (seen[id]) return null;
+  return html`
+    <div onClick=${()=>{store.markCoachMark(id);onDismiss?.();}}
+      style="position:fixed;inset:0;z-index:70;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:24px;cursor:pointer;"
+    >
+      <div style="background:var(--surface);border:1px solid var(--accent);border-radius:18px;padding:18px 22px;max-width:280px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+        <div style="font-size:14px;color:var(--text);font-weight:600;line-height:1.5;">${text}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:10px;">Нажмите, чтобы закрыть</div>
+      </div>
+    </div>
+  `;
+}
+
 function Calendar() {
   const [view, setView] = useState('calendar');
   const [viewDate, setViewDate] = useState(() => new Date());
@@ -726,8 +803,14 @@ function Calendar() {
     return { energy: avg('energyLevel'), anxiety: avg('anxietyLevel'), sleep: avg('sleepQuality'), libido: avg('libidoLevel'), count: entries.length };
   }, [logs]);
 
+  const seen = store.getState().coachMarksSeen;
+  const [, forceUpdate] = useState(0);
+
   return html`
     <${Scrollable} style="padding:28px 20px 120px;">
+      ${!seen.dayTap && html`<${CoachMark} id="dayTap" text="Нажмите на день, чтобы увидеть фазу" onDismiss=${()=>forceUpdate(x=>x+1)} />`}
+      ${seen.dayTap && !seen.swipeMonth && html`<${CoachMark} id="swipeMonth" text="Листайте месяцы стрелками ‹ ›" onDismiss=${()=>forceUpdate(x=>x+1)} />`}
+      ${seen.dayTap && seen.swipeMonth && !seen.markPeriod && html`<${CoachMark} id="markPeriod" text="Удерживайте день, чтобы отметить с него начало месячных" onDismiss=${()=>forceUpdate(x=>x+1)} />`}
       <h1 style="font-size:28px;font-weight:800;margin-bottom:6px;letter-spacing:-0.02em;" class="anim">Календарь</h1>
       <p style="font-size:13px;color:var(--text2);margin-bottom:24px;font-weight:500;" class="anim">Визуализация цикла и симптомов</p>
 
@@ -737,6 +820,37 @@ function Calendar() {
       </div>
 
       ${view==='calendar' && html`
+        ${(() => {
+          const todayDay = lps ? NE.dayOf(lps, cycleLength) : null;
+          const daysUntilPeriod = todayDay !== null ? (cycleLength - todayDay + 1 > 0 ? cycleLength - todayDay + 1 : 0) : null;
+          return html`
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;" class="anim">
+              <${Card} style="padding:14px 8px;text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent);">${todayDay ?? '–'}</div>
+                <div style="font-size:10px;color:var(--text2);margin-top:2px;font-weight:600;">день цикла</div>
+              <//>
+              <${Card} style="padding:14px 8px;text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent);">${daysUntilPeriod!==null ? (daysUntilPeriod<=0?'—':daysUntilPeriod) : '–'}</div>
+                <div style="font-size:10px;color:var(--text2);margin-top:2px;font-weight:600;">дней до месячных</div>
+              <//>
+              <${Card} style="padding:14px 8px;text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:var(--accent);">${cycleLength}</div>
+                <div style="font-size:10px;color:var(--text2);margin-top:2px;font-weight:600;">длина цикла</div>
+              <//>
+            </div>
+            <div style="display:flex;height:6px;border-radius:999px;overflow:hidden;margin-bottom:24px;" class="anim">
+              ${(() => {
+                const segs = [];
+                for (let d=1; d<=cycleLength; d++) segs.push(NE.dcat(d, cycleLength));
+                // collapse consecutive same-category days into segments proportional to their length
+                const blocks = [];
+                segs.forEach(cat => { const last = blocks[blocks.length-1]; if (last && last.cat===cat) last.n++; else blocks.push({cat, n:1}); });
+                return blocks.map((b,i) => html`<div key=${i} style="flex:${b.n};background:${NE.dc(b.cat)};" />`);
+              })()}
+            </div>
+          `;
+        })()}
+
         <${Card} class="anim">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
             <button onClick=${prevMonth} style="background:var(--surface);border:none;border-radius:12px;width:36px;height:36px;color:var(--text);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;" onTouchStart=${e=>e.currentTarget.style.transform='scale(0.9)'} onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}>‹</button>
@@ -751,19 +865,36 @@ function Calendar() {
               const iso = localISO(dateObj);
               const log = logs[iso];
               const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
-              const ph = dayNum ? NE.phase(dayNum, cycleLength) : null;
+              const cat = dayNum ? NE.dcat(dayNum, cycleLength) : null;
               const fert = dayNum ? NE.fertility(dayNum, cycleLength) : null;
               const fertLevel = {low:1,medium:2,high:3}[fert] || 0;
-              const color = ph ? NE.pc(ph) : 'var(--text2)';
+              const color = cat ? NE.dc(cat) : 'var(--text2)';
               const isToday = isSameDay(dateObj, today);
               const isFuture = dateObj > today;
               const hasSymptoms = log?.symptoms?.length > 0;
 
+              const markPeriodFrom = () => {
+                haptic('medium');
+                const doMark = () => {
+                  store.addLog({ ...(logs[iso] || { date: iso, energyLevel:3, focusLevel:3, anxietyLevel:2, sleepQuality:3 }), date: iso, isPeriod: true });
+                  notify('success');
+                };
+                if (tg?.showConfirm) tg.showConfirm(`Отметить начало месячных с ${d} ${months[month].toLowerCase()}?`, ok => { if (ok) doMark(); });
+                else if (confirm(`Отметить начало месячных с ${d} ${months[month].toLowerCase()}?`)) doMark();
+              };
+              let pressTimer = null;
+              let longPressFired = false;
+              const onPressStart = e => { e.currentTarget.style.transform='scale(0.92)'; pressTimer = setTimeout(()=>{longPressFired=true;markPeriodFrom();}, 500); };
+              const onPressEnd = e => { e.currentTarget.style.transform='scale(1)'; if (pressTimer) clearTimeout(pressTimer); };
+
               return html`
-                <button key=${i} onClick=${()=>{haptic('medium');setSelectedDate(iso);}}
+                <button key=${i} onClick=${()=>{ if (longPressFired) { longPressFired=false; return; } haptic('medium'); setSelectedDate(iso); }}
                   style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?(color+'60'):'transparent'};background:${color}10;opacity:${isFuture?0.5:1};color:var(--text);cursor:pointer;padding:0;"
-                  onTouchStart=${e=>e.currentTarget.style.transform='scale(0.92)'}
-                  onTouchEnd=${e=>e.currentTarget.style.transform='scale(1)'}
+                  onTouchStart=${onPressStart}
+                  onTouchEnd=${onPressEnd}
+                  onMouseDown=${onPressStart}
+                  onMouseUp=${onPressEnd}
+                  onMouseLeave=${onPressEnd}
                 >
                   <span style="font-size:13px;font-weight:800;color:${color};">${d}</span>
                   ${dayNum && html`<span style="font-size:8px;color:var(--text2);margin-top:2px;opacity:0.7;font-weight:500;">${dayNum}д</span>`}
@@ -777,10 +908,10 @@ function Calendar() {
               `;
             })}
           </div>
-          <div style="display:flex;justify-content:center;gap:18px;margin-top:24px;flex-wrap:wrap;">
-            ${[['menstruation','Менструация'],['follicular','Фолликулярная'],['ovulation','Овуляция'],['luteal','Лютеиновая']].map(p => html`
+          <div style="display:flex;justify-content:center;gap:16px;margin-top:24px;flex-wrap:wrap;">
+            ${[['menstruation','Менструация'],['follicular','Фолликулярная'],['fertile','Фертильное окно'],['ovulation','Овуляция'],['luteal','Лютеиновая'],['pms','ПМС']].map(p => html`
               <div key=${p[0]} style="display:flex;align-items:center;gap:6px;">
-                <div style="width:10px;height:10px;border-radius:50%;background:${NE.pc(p[0])};box-shadow:0 0 8px ${NE.pc(p[0])}50;" />
+                <div style="width:10px;height:10px;border-radius:50%;background:${NE.dc(p[0])};box-shadow:0 0 8px ${NE.dc(p[0])}50;" />
                 <span style="font-size:11px;color:var(--text2);font-weight:500;">${p[1]}</span>
               </div>
             `)}
@@ -820,15 +951,8 @@ function Calendar() {
       `)}
 
       ${view==='stats' && html`
-        <div style="margin-top:24px;text-align:center;">
-          <button onClick=${() => {
-            const doReset = () => store.resetAll();
-            if (tg?.showConfirm) tg.showConfirm('Удалить все данные приложения (циклы, чек-ины, отметки)? Это нельзя отменить.', ok => { if (ok) doReset(); });
-            else if (confirm('Удалить все данные приложения? Это нельзя отменить.')) doReset();
-          }} style="background:none;border:none;color:${theme.danger};font-size:13px;font-weight:600;padding:10px;cursor:pointer;opacity:0.8;">
-            Сбросить все данные приложения
-          </button>
-          <div style="font-size:10px;color:var(--text2);opacity:0.5;margin-top:4px;">build ${APP_BUILD}</div>
+        <div style="margin-top:24px;text-align:center;font-size:11px;color:var(--text2);opacity:0.6;">
+          Сброс данных и экспорт — во вкладке «Настройки»
         </div>
       `}
 
@@ -1093,6 +1217,119 @@ function CheckIn({ onClose }) {
 }
 
 
+function Settings() {
+  const [profile, setP] = useState(store.getState().profile);
+  const [palette, setPal] = useState(store.getState().palette);
+  const [paletteName, setPalName] = useState(store.getState().paletteName);
+  const [notif, setNotif] = useState(store.getState().notifSettings);
+  useEffect(() => store.sub(s => { setP(s.profile); setPal(s.palette); setPalName(s.paletteName); setNotif(s.notifSettings); }), []);
+
+  if (!profile) return html`<div style="padding:40px 20px;color:var(--text2);text-align:center;">Загрузка...</div>`;
+
+  const saveProfile = patch => { store.setProfile({ ...profile, ...patch }); haptic('light'); };
+  const cats = [['menstruation','Менструация'],['follicular','Фолликулярная'],['fertile','Фертильное окно'],['ovulation','Овуляция'],['luteal','Лютеиновая'],['pms','ПМС']];
+  const swatchOptions = ['#EF4444','#EC4899','#FBBF24','#38BDF8','#6366F1','#A8A29E','#F97316','#22D3EE','#A78BFA','#10B981','#F43F5E','#94A3B8'];
+
+  const downloadCSV = () => {
+    const csv = store.exportCSV();
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'neuroflow_export.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    haptic('medium');
+  };
+
+  return html`
+    <${Scrollable} style="padding:28px 20px 120px;">
+      <h1 style="font-size:28px;font-weight:800;margin-bottom:24px;letter-spacing:-0.02em;" class="anim">Настройки</h1>
+
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Цикл</div>
+      <${Card} style="margin-bottom:18px;" class="anim">
+        <div style="font-size:14px;color:var(--text2);font-weight:500;margin-bottom:14px;">Длина цикла</div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:24px;margin-bottom:20px;">
+          <button onClick=${()=>saveProfile({averageCycleLength:Math.max(21,profile.averageCycleLength-1)})}
+            style="width:44px;height:44px;border-radius:14px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:20px;font-weight:700;cursor:pointer;">−</button>
+          <span style="font-size:26px;font-weight:800;color:var(--accent);min-width:56px;text-align:center;font-variant-numeric:tabular-nums;">${profile.averageCycleLength}</span>
+          <button onClick=${()=>saveProfile({averageCycleLength:Math.min(38,profile.averageCycleLength+1)})}
+            style="width:44px;height:44px;border-radius:14px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:20px;font-weight:700;cursor:pointer;">+</button>
+        </div>
+        <div style="font-size:14px;color:var(--text2);font-weight:500;margin-bottom:12px;">Длительность менструации</div>
+        <div style="display:flex;gap:6px;">
+          ${[3,4,5,6,7,8].map(n => html`
+            <button key=${n} onClick=${()=>saveProfile({averagePeriodLength:n})}
+              style="flex:1;height:40px;border-radius:10px;border:1.5px solid ${profile.averagePeriodLength===n?'var(--accent)':'var(--border)'};background:${profile.averagePeriodLength===n?'var(--accent)':'var(--surface-hover)'};color:${profile.averagePeriodLength===n?'#fff':'var(--text)'};font-size:14px;font-weight:700;cursor:pointer;">${n}</button>
+          `)}
+        </div>
+      <//>
+
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Уведомления</div>
+      <${Card} style="margin-bottom:18px;" class="anim">
+        <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:16px;padding:10px 12px;background:${theme.accentGlow};border-radius:12px;">
+          Пуши требуют серверной части бота — сейчас настройки сохраняются, но реальные уведомления работают только после того, как я подключу бэкенд (см. инструкцию в чате).
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <span style="font-size:14px;color:var(--text);font-weight:500;">За сколько дней напомнить о месячных</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:20px;">
+          ${[1,2,3,5,7].map(n => html`
+            <button key=${n} onClick=${()=>store.setNotifSettings({periodReminder:n})}
+              style="flex:1;height:38px;border-radius:10px;border:1.5px solid ${notif.periodReminder===n?'var(--accent)':'var(--border)'};background:${notif.periodReminder===n?'var(--accent)':'var(--surface-hover)'};color:${notif.periodReminder===n?'#fff':'var(--text)'};font-size:13px;font-weight:700;cursor:pointer;">${n}</button>
+          `)}
+        </div>
+        ${[['ovulationAlert','Уведомлять в день овуляции'],['pmsAlert','Уведомлять в начале ПМС']].map(([k,label]) => html`
+          <div key=${k} style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+            <span style="font-size:14px;color:var(--text);font-weight:500;">${label}</span>
+            <button onClick=${()=>store.setNotifSettings({[k]:!notif[k]})}
+              style="width:48px;height:28px;border-radius:999px;border:none;background:${notif[k]?theme.accentSolid||'var(--accent)':'var(--surface-hover)'};position:relative;cursor:pointer;">
+              <div style="position:absolute;width:22px;height:22px;border-radius:50%;background:white;top:3px;transition:transform 0.2s;transform:translateX(${notif[k]?22:3}px);" />
+            </button>
+          </div>
+        `)}
+      <//>
+
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Цвета фаз</div>
+      <${Card} style="margin-bottom:18px;" class="anim">
+        <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;margin-bottom:16px;">
+          ${Object.entries(PRESETS).map(([id,p]) => html`
+            <button key=${id} onClick=${()=>{store.setPalette(p, id);haptic('medium');}}
+              style="flex-shrink:0;padding:10px 14px;border-radius:14px;border:1.5px solid ${paletteName===id?'var(--accent)':'var(--border)'};background:var(--surface-hover);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+              <div style="display:flex;gap:3px;">${cats.map(([c])=>html`<div key=${c} style="width:8px;height:8px;border-radius:50%;background:${p[c]};" />`)}</div>
+              <span style="font-size:11px;color:var(--text);font-weight:600;">${p.name}</span>
+            </button>
+          `)}
+        </div>
+        ${cats.map(([cat,label]) => html`
+          <div key=${cat} style="margin-bottom:14px;">
+            <div style="font-size:13px;color:var(--text2);font-weight:500;margin-bottom:8px;">${label}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              ${swatchOptions.map(color => html`
+                <button key=${color} onClick=${()=>{store.setPalette({...palette,[cat]:color},'custom');haptic('light');}}
+                  style="width:28px;height:28px;border-radius:9px;background:${color};border:2px solid ${palette[cat]===color?'var(--text)':'transparent'};cursor:pointer;" />
+              `)}
+            </div>
+          </div>
+        `)}
+        <button onClick=${()=>{store.resetPalette();haptic();}} style="width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:none;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;margin-top:4px;">Сбросить к стандартной палитре</button>
+      <//>
+
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Данные</div>
+      <${Card} style="margin-bottom:18px;" class="anim">
+        <button onClick=${downloadCSV} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">📄 Экспорт в CSV</button>
+        <button onClick=${() => {
+          const doReset = () => store.resetAll();
+          if (tg?.showConfirm) tg.showConfirm('Удалить все данные приложения? Это нельзя отменить.', ok => { if (ok) doReset(); });
+          else if (confirm('Удалить все данные приложения? Это нельзя отменить.')) doReset();
+        }} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid ${theme.danger}40;background:none;color:${theme.danger};font-size:14px;font-weight:600;cursor:pointer;">Удалить все данные</button>
+      <//>
+
+      <div style="text-align:center;font-size:10px;color:var(--text2);opacity:0.5;margin-top:8px;">build ${APP_BUILD}</div>
+    </${Scrollable}>
+  `;
+}
+
+
 function App() {
   const [tab, setTab] = useState('dashboard');
   const [checkInOpen, setCheckInOpen] = useState(false);
@@ -1119,11 +1356,12 @@ function App() {
       ${tab==='dashboard' && html`<${Dashboard} onCheckIn=${()=>setCheckInOpen(true)} />`}
       ${tab==='planner' && html`<${Planner} />`}
       ${tab==='calendar' && html`<${Calendar} />`}
+      ${tab==='settings' && html`<${Settings} />`}
       ${checkInOpen && html`<${CheckIn} onClose=${()=>setCheckInOpen(false)} />`}
 
       ${!checkInOpen && html`
       <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
-        ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'}].map(t => html`
+        ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'},{k:'settings',l:'Настройки',i:'⚙'}].map(t => html`
           <button key=${t.k} onClick=${()=>changeTab(t.k)} 
             style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:6px 28px;border-radius:12px;border:none;background:${tab===t.k?'var(--surface)':'none'};color:${tab===t.k?'var(--accent)':'var(--text2)'};font-weight:${tab===t.k?700:500};font-size:10px;cursor:pointer;transition:all 0.2s;"
           >
