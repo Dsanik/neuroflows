@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.16-3'; // bump this on every delivered fix so testers can confirm which build they're on
+const APP_BUILD = '2026.08.16-4'; // bump this on every delivered fix so testers can confirm which build they're on
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 let subs = [];
 let state = { profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false, taskChecks: {}, customTasks: { work: [], body: [], food: [] } };
@@ -124,11 +124,22 @@ const NE = {
   getProgesterone(d, L=28) { const ov=L-14; return d<=ov ? 0.05 : Math.max(0, Math.sin((Math.PI*(d-ov))/14)); },
   getTestosterone(d, L=28) { const ov=L-14; return Math.exp(-Math.pow(d-ov,2)/4); },
   cns(e, p, s=4) { let b=e*0.6-p*0.3+0.5; return Math.min(100, Math.max(0, b*50+s*10)); },
-  phase(d, L=28) { const ov=L-14; if(d<=5)return'menstruation'; if(d<=ov-1)return'follicular'; if(d<=ov+2)return'ovulation'; return'luteal'; },
+  phase(d, L=28) { const ov=L-14; if(d<=5)return'menstruation'; if(d<ov)return'follicular'; if(d===ov)return'ovulation'; return'luteal'; },
+  // Fertile window: ~5 days before ovulation (sperm can survive that long) + the ovulation day itself.
+  // Tiers loosely follow published conception-probability-by-cycle-day data (Wilcox et al. 1995) — approximate, not personalized.
+  fertility(d, L=28) {
+    const ov = L-14; const daysBefore = ov - d;
+    if (daysBefore < 0 || daysBefore > 5) return null;
+    if (daysBefore <= 1) return 'high';
+    if (daysBefore <= 3) return 'medium';
+    return 'low';
+  },
   dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=(diff%L)+1; return day>0?day:1; },
   prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#EF4444',follicular:'#EC4899',ovulation:'#38BDF8',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
+  fc(tier) { return {low:'#86EFAC',medium:'#4ADE80',high:'#10B981'}[tier]; },
+  fn(tier) { return {low:'Шанс: низкий',medium:'Шанс: средний',high:'Шанс: высокий'}[tier]; },
   insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
@@ -743,6 +754,7 @@ function Calendar() {
               const log = logs[iso];
               const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
               const ph = dayNum ? NE.phase(dayNum, cycleLength) : null;
+              const fert = dayNum ? NE.fertility(dayNum, cycleLength) : null;
               const color = ph ? NE.pc(ph) : 'var(--text2)';
               const isToday = isSameDay(dateObj, today);
               const isFuture = dateObj > today;
@@ -762,6 +774,7 @@ function Calendar() {
                     ${isPeriod && html`<div style="width:5px;height:5px;border-radius:50%;background:${theme.danger};box-shadow:0 0 4px ${theme.danger}80;" />`}
                     ${hasSymptoms && html`<div style="width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px ${theme.accentGlow};" />`}
                   </div>
+                  ${fert && html`<div style="position:absolute;bottom:3px;left:8px;right:8px;height:3px;border-radius:2px;background:${NE.fc(fert)};box-shadow:0 0 4px ${NE.fc(fert)}70;" />`}
                 </button>
               `;
             })}
@@ -771,6 +784,14 @@ function Calendar() {
               <div key=${p[0]} style="display:flex;align-items:center;gap:6px;">
                 <div style="width:10px;height:10px;border-radius:50%;background:${NE.pc(p[0])};box-shadow:0 0 8px ${NE.pc(p[0])}50;" />
                 <span style="font-size:11px;color:var(--text2);font-weight:500;">${p[1]}</span>
+              </div>
+            `)}
+          </div>
+          <div style="display:flex;justify-content:center;gap:14px;margin-top:14px;flex-wrap:wrap;">
+            ${['low','medium','high'].map(t => html`
+              <div key=${t} style="display:flex;align-items:center;gap:6px;">
+                <div style="width:16px;height:3px;border-radius:2px;background:${NE.fc(t)};" />
+                <span style="font-size:10px;color:var(--text2);font-weight:500;">${NE.fn(t)}</span>
               </div>
             `)}
           </div>
