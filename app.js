@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.16-8';
+const APP_BUILD = '2026.08.16-9';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -215,6 +215,14 @@ const NE = {
   },
   dc(cat) { return (state.palette && state.palette[cat]) || DEFAULT_PALETTE[cat]; },
   dn(cat) { return {menstruation:'Менструация',follicular:'Фолликулярная',fertile:'Фертильное окно',ovulation:'Овуляция',luteal:'Лютеиновая',pms:'ПМС'}[cat]; },
+  ddesc(cat) { return {
+    menstruation: 'Дни кровотечения. Энергия может быть понижена — вероятны спазмы, усталость, головные боли.',
+    follicular: 'Энергия восстанавливается, настроение улучшается. Хорошее время для новых начинаний.',
+    fertile: 'Высокая вероятность зачатия. Овуляция близко — сперматозоиды могут «ждать» до 5 дней.',
+    ovulation: 'Вероятность зачатия максимальна. Яйцеклетка живёт 12–24 часа.',
+    luteal: 'Прогестерон высок. Организм готовится к менструации, возможен лёгкий дискомфорт.',
+    pms: 'Возможны перепады настроения, отёчность, раздражительность — это нормально для этой фазы.',
+  }[cat]; },
   insight(ph, day) { const map={menstruation:'Обычно в этой фазе прогестерон и эстроген низкие. Энергия может быть снижена — хорошее время для восстановления ЦНС.',follicular:'Обычно в этой фазе эстроген растёт. Многие отмечают прилив сил для новых проектов и обучения.',ovulation:`Обычно в этой фазе (день ${day}) тестостерон и эстроген высокие. У многих растёт уверенность и коммуникабельность.`,luteal:'Обычно в этой фазе прогестерон доминирует. Хорошее время для глубокого фокуса, но возможна повышенная чувствительность.'}; return map[ph]; },
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
@@ -743,49 +751,6 @@ function Planner() {
 }
 
 
-function DayDetailModal({ date, dayData, onClose }) {
-  const d = new Date(date + 'T00:00:00');
-  const log = dayData || {};
-  const hasData = !!dayData;
-
-  return html`
-    <div style="position:fixed;inset:0;z-index:120;background:rgba(0,0,0,0.6);backdrop-filter:blur(12px);display:flex;flex-direction:column;justify-content:flex-end;animation:fadeIn 0.2s ease;" onClick=${onClose}>
-      <div style="background:var(--bg2);border-radius:28px 28px 0 0;padding:28px 20px 40px;border-top:1px solid var(--border);box-shadow:0 -16px 48px rgba(0,0,0,0.4);animation:slideUp 0.35s cubic-bezier(0.16,1,0.3,1);" onClick=${e => e.stopPropagation()}>
-        <div style="width:40px;height:5px;border-radius:999px;background:var(--surface-hover);margin:0 auto 20px;" />
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-          <h3 style="font-size:20px;font-weight:800;">${d.getDate()} ${['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][d.getMonth()]} ${d.getFullYear()}</h3>
-          <button onClick=${onClose} style="background:var(--surface);border:none;border-radius:12px;width:36px;height:36px;color:var(--text);font-size:18px;cursor:pointer;">✕</button>
-        </div>
-        ${!hasData && html`<p style="color:var(--text2);text-align:center;padding:20px 0;">Нет записи за этот день</p>`}
-        ${hasData && html`
-          <div style="display:flex;flex-direction:column;gap:12px;">
-            ${log.isPeriod && html`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:14px;background:${theme.danger}15;border:1px solid ${theme.danger}30;"><span style="font-size:20px;">🩸</span><span style="font-weight:700;color:${theme.danger};">Менструация</span></div>`}
-            ${log.symptoms?.length > 0 && html`
-              <div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);">
-                <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px;">Симптомы</div>
-                <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                  ${log.symptoms.map(s => html`<span key=${s} style="padding:5px 10px;border-radius:8px;background:var(--bg);font-size:12px;font-weight:600;color:var(--text);">${{cramps:'Спазмы',bloating:'Вздутие',headache:'Головная боль',breast_tenderness:'Чувств. груди',acne:'Высыпания',fatigue:'Усталость',insomnia:'Бессонница',cravings:'Тяга к сладкому'}[s] || s}</span>`)}
-                </div>
-              </div>
-            `}
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-              ${[{l:'Энергия',v:log.energyLevel,c:'#10B981'},{l:'Фокус',v:log.focusLevel,c:'#F59E0B'},{l:'Тревожность',v:log.anxietyLevel,c:'#EF4444'},{l:'Сон',v:log.sleepQuality,c:'#6366F1'}].map(m => html`
-                <div key=${m.l} style="padding:12px;border-radius:14px;background:var(--surface);border:1px solid var(--border);">
-                  <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600;">${m.l}</div>
-                  <div style="font-size:18px;font-weight:800;color:${m.c};">${m.v}/5</div>
-                </div>
-              `)}
-            </div>
-            ${log.mood && html`<div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:10px;"><span style="font-size:20px;">${{euphoric:'🤩',calm:'😌',irritated:'😤',sad:'😢',anxious:'😰',numb:'😶'}[log.mood]}</span><span style="font-weight:600;">${{euphoric:'Эйфория',calm:'Спокойствие',irritated:'Раздражение',sad:'Грусть',anxious:'Тревога',numb:'Апатия'}[log.mood]}</span></div>`}
-            ${log.intimacy?.occurred && html`<div style="padding:12px 16px;border-radius:14px;background:${theme.love}10;border:1px solid ${theme.love}25;"><div style="font-size:11px;font-weight:700;color:${theme.love};text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;">Интимность</div><div style="font-size:14px;font-weight:600;">${log.intimacy.type==='partner'?'С партнёром':'Соло'} ${log.intimacy.orgasm?'✨':''} ${log.intimacy.discomfort?'⚠':''}</div></div>`}
-            ${log.cervicalMucus && log.cervicalMucus !== 'dry' && html`<div style="padding:12px 16px;border-radius:14px;background:var(--surface);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text2);font-weight:600;">Шейная слизь</div><div style="font-size:14px;font-weight:700;margin-top:4px;">${{dry:'Сухо',sticky:'Липкие',creamy:'Кремовые',egg_white:'Яичный белок'}[log.cervicalMucus]}</div></div>`}
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-}
-
 function CoachMark({ id, text, onDismiss }) {
   const [seen] = useState(store.getState().coachMarksSeen);
   if (seen[id]) return null;
@@ -804,7 +769,7 @@ function CoachMark({ id, text, onDismiss }) {
 function Calendar() {
   const [view, setView] = useState('calendar');
   const [viewDate, setViewDate] = useState(() => new Date());
-  const [selectedDate, setSelectedDate] = useState(null);
+  const [infoDate, setInfoDate] = useState(null);
   const [logs, setLogs] = useState(store.getState().logs);
   const [profile, setProfile] = useState(store.getState().profile);
 
@@ -899,8 +864,6 @@ function Calendar() {
               const log = logs[iso];
               const dayNum = dayOfCycleForDate(dateObj, lps, cycleLength);
               const cat = dayNum ? NE.dcat(dayNum, cycleLength) : null;
-              const fert = dayNum ? NE.fertility(dayNum, cycleLength) : null;
-              const fertLevel = {low:1,medium:2,high:3}[fert] || 0;
               const color = cat ? NE.dc(cat) : 'var(--text2)';
               const isToday = isSameDay(dateObj, today);
               const isFuture = dateObj > today;
@@ -921,8 +884,8 @@ function Calendar() {
               const onPressEnd = e => { e.currentTarget.style.transform='scale(1)'; if (pressTimer) clearTimeout(pressTimer); };
 
               return html`
-                <button key=${i} onClick=${()=>{ if (longPressFired) { longPressFired=false; return; } haptic('medium'); setSelectedDate(iso); }}
-                  style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?'#ffffff':'transparent'};background:${cat?color:'var(--surface)'};opacity:${isFuture?0.55:1};box-shadow:${isToday?'0 0 0 3px '+color+'40':'none'};cursor:pointer;padding:0;"
+                <button key=${i} onClick=${()=>{ if (longPressFired) { longPressFired=false; return; } haptic('medium'); setInfoDate(iso); }}
+                  style="aspect-ratio:1/1;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;transition:all 0.2s;border:2px solid ${isToday?'#ffffff':(infoDate===iso?color:'transparent')};background:${cat?color:'var(--surface)'};opacity:${isFuture?0.55:1};box-shadow:${isToday?'0 0 0 3px '+color+'40':'none'};cursor:pointer;padding:0;"
                   onTouchStart=${onPressStart}
                   onTouchEnd=${onPressEnd}
                   onMouseDown=${onPressStart}
@@ -932,11 +895,6 @@ function Calendar() {
                   <span style="font-size:14px;font-weight:800;color:${cat?'#ffffff':'var(--text)'};text-shadow:${cat?'0 1px 2px rgba(0,0,0,0.25)':'none'};">${d}</span>
                   ${dayNum && html`<span style="font-size:8px;color:${cat?'rgba(255,255,255,0.85)':'var(--text2)'};margin-top:2px;font-weight:600;">${dayNum}д</span>`}
                   ${hasSymptoms && html`<div style="width:5px;height:5px;border-radius:50%;background:${cat?'#fff':'var(--accent)'};box-shadow:0 0 4px rgba(0,0,0,0.3);margin-top:3px;" />`}
-                  ${fertLevel > 0 && html`
-                    <div style="position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:2px;">
-                      ${[1,2,3].map(n => html`<div key=${n} style="width:6px;height:3px;border-radius:1px;background:${n<=fertLevel?'#ffffff':'rgba(255,255,255,0.3)'};" />`)}
-                    </div>
-                  `}
                 </button>
               `;
             })}
@@ -949,15 +907,36 @@ function Calendar() {
               </div>
             `)}
           </div>
-          <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap;">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <div style="display:flex;gap:2px;">${[1,2,3].map(n => html`<div key=${n} style="width:6px;height:3px;border-radius:1px;background:#10B981;" />`)}</div>
-              <span style="font-size:10px;color:var(--text2);font-weight:500;">Шанс зачатия (заполненность = выше)</span>
-            </div>
-          </div>
-          <div style="display:flex;justify-content:center;gap:16px;margin-top:14px;flex-wrap:wrap;opacity:0.7;">
-            <div style="display:flex;align-items:center;gap:6px;"><div style="width:5px;height:5px;border-radius:50%;background:var(--accent);" /><span style="font-size:10px;color:var(--text2);">Есть симптомы в этот день</span></div>
-          </div>
+
+          ${infoDate && (() => {
+            const dObj = new Date(infoDate + 'T00:00:00');
+            const dn = dayOfCycleForDate(dObj, lps, cycleLength);
+            const cat = dn ? NE.dcat(dn, cycleLength) : null;
+            const c = cat ? NE.dc(cat) : theme.text2;
+            const log = logs[infoDate];
+            const dateLabel = `${dObj.getDate()} ${['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][dObj.getMonth()]}`;
+            return html`
+              <${Card} style="margin-top:16px;border-color:${c}35;background:${c}10;" class="anim">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+                  <div style="font-size:15px;font-weight:800;color:${c};">${dateLabel}${cat ? ' — ' + NE.dn(cat) : ''}</div>
+                  <button onClick=${()=>setInfoDate(null)} style="background:var(--surface);border:none;border-radius:10px;width:28px;height:28px;color:var(--text2);font-size:14px;cursor:pointer;flex-shrink:0;">✕</button>
+                </div>
+                ${cat && html`<p style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:${log ? '14px' : '0'};">${NE.ddesc(cat)}</p>`}
+                ${log ? html`
+                  <div style="display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid ${c}25;">
+                    ${log.isPeriod && html`<div style="font-size:12px;color:${theme.danger};font-weight:700;">🩸 Отмечена менструация</div>`}
+                    ${log.symptoms?.length > 0 && html`<div style="font-size:12px;color:var(--text2);">Симптомы: <span style="color:var(--text);font-weight:600;">${log.symptoms.map(s=>({cramps:'Спазмы',bloating:'Вздутие',headache:'Головная боль',breast_tenderness:'Чувств. груди',acne:'Высыпания',fatigue:'Усталость',insomnia:'Бессонница',cravings:'Тяга к сладкому'}[s]||s)).join(', ')}</span></div>`}
+                    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text2);">
+                      <span>Энергия: <b style="color:var(--text);">${log.energyLevel}/5</b></span>
+                      <span>Фокус: <b style="color:var(--text);">${log.focusLevel}/5</b></span>
+                      <span>Тревожность: <b style="color:var(--text);">${log.anxietyLevel}/5</b></span>
+                      <span>Сон: <b style="color:var(--text);">${log.sleepQuality}/5</b></span>
+                    </div>
+                  </div>
+                ` : html`<p style="font-size:12px;color:var(--text2);margin-top:${cat?'12px':'0'};">Нет записи за этот день</p>`}
+              <//>
+            `;
+          })()}
         <//>
       `}
 
@@ -989,7 +968,6 @@ function Calendar() {
         </div>
       `}
 
-      ${selectedDate && html`<${DayDetailModal} date=${selectedDate} dayData=${logs[selectedDate]} onClose=${()=>setSelectedDate(null)} />`}
     <//>
   `;
 }
