@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.16-9';
+const APP_BUILD = '2026.08.17-1';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -311,6 +311,13 @@ function localISO(d) {
   return `${y}-${m}-${day}`;
 }
 const todayStr = () => localISO(new Date());
+function textToBase64(str) { return btoa(unescape(encodeURIComponent(str))); }
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
 const isSameDay = (a, b) => a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 
 function Scrollable({ children, style }) {
@@ -1241,8 +1248,39 @@ function Settings() {
   const cats = [['menstruation','Менструация'],['follicular','Фолликулярная'],['fertile','Фертильное окно'],['ovulation','Овуляция'],['luteal','Лютеиновая'],['pms','ПМС']];
   const swatchOptions = ['#EF4444','#EC4899','#FBBF24','#38BDF8','#6366F1','#A8A29E','#F97316','#22D3EE','#A78BFA','#10B981','#F43F5E','#94A3B8'];
 
-  const downloadCSV = () => {
+  const [exporting, setExporting] = useState('');
+
+  const sendViaBot = async (filename, base64) => {
+    const chatId = tg?.initDataUnsafe?.user?.id;
+    if (!chatId || !BACKEND_URL) return false;
+    setExporting(filename);
+    try {
+      const r = await fetch(`${BACKEND_URL}/api/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, filename, content_base64: base64 }),
+      });
+      const data = await r.json().catch(() => ({}));
+      setExporting('');
+      if (r.ok && data.ok) {
+        notify('success');
+        tg?.showAlert ? tg.showAlert('Файл отправлен тебе в чат с ботом ✅') : alert('Файл отправлен в чат с ботом');
+        return true;
+      }
+      return false;
+    } catch (e) {
+      setExporting('');
+      return false;
+    }
+  };
+
+  const downloadCSV = async () => {
     const csv = store.exportCSV();
+    const sentViaBot = await sendViaBot('neuroflow_export.csv', textToBase64(csv));
+    if (sentViaBot) return;
+    // Fallback for testing outside Telegram (regular browser tab) — inside
+    // Telegram's WebView this blob-download approach silently does nothing,
+    // which is exactly the bug this whole function now works around.
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1252,7 +1290,7 @@ function Settings() {
     haptic('medium');
   };
 
-  const downloadPDF = () => {
+  const downloadPDF = async () => {
     if (!window.jspdf) { alert('PDF-библиотека не загрузилась. Проверьте подключение к интернету и повторите попытку.'); return; }
     try {
       const { jsPDF } = window.jspdf;
@@ -1270,6 +1308,9 @@ function Settings() {
         doc.text(`${l.date} | Энергия:${l.energyLevel} Фокус:${l.focusLevel} Тревога:${l.anxietyLevel} Сон:${l.sleepQuality} ${l.isPeriod?'[Менструация]':''}`, 14, y);
         y += 6;
       });
+      const arrayBuffer = doc.output('arraybuffer');
+      const sentViaBot = await sendViaBot('neuroflow_report.pdf', arrayBufferToBase64(arrayBuffer));
+      if (sentViaBot) return;
       doc.save('neuroflow_report.pdf');
       haptic('medium');
     } catch(e) { console.error(e); alert('Не получилось собрать PDF.'); }
@@ -1350,8 +1391,8 @@ function Settings() {
 
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Данные</div>
       <${Card} style="margin-bottom:18px;" class="anim">
-        <button onClick=${downloadCSV} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">📄 Экспорт в CSV</button>
-        <button onClick=${downloadPDF} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;">📑 Экспорт в PDF</button>
+        <button onClick=${downloadCSV} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='neuroflow_export.csv' ? 'Отправка...' : '📄 Экспорт в CSV'}</button>
+        <button onClick=${downloadPDF} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='neuroflow_report.pdf' ? 'Отправка...' : '📑 Экспорт в PDF'}</button>
         <button onClick=${() => {
           const doReset = () => store.resetAll();
           if (tg?.showConfirm) tg.showConfirm('Удалить все данные приложения? Это нельзя отменить.', ok => { if (ok) doReset(); });
