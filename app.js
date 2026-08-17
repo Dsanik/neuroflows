@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-1';
+const APP_BUILD = '2026.08.17-2';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -1253,7 +1253,6 @@ function Settings() {
   const sendViaBot = async (filename, base64) => {
     const chatId = tg?.initDataUnsafe?.user?.id;
     if (!chatId || !BACKEND_URL) return false;
-    setExporting(filename);
     try {
       const r = await fetch(`${BACKEND_URL}/api/export`, {
         method: 'POST',
@@ -1261,7 +1260,6 @@ function Settings() {
         body: JSON.stringify({ chat_id: chatId, filename, content_base64: base64 }),
       });
       const data = await r.json().catch(() => ({}));
-      setExporting('');
       if (r.ok && data.ok) {
         notify('success');
         tg?.showAlert ? tg.showAlert('Файл отправлен тебе в чат с ботом ✅') : alert('Файл отправлен в чат с ботом');
@@ -1269,51 +1267,110 @@ function Settings() {
       }
       return false;
     } catch (e) {
-      setExporting('');
       return false;
     }
   };
 
-  const downloadCSV = async () => {
-    const csv = store.exportCSV();
-    const sentViaBot = await sendViaBot('neuroflow_export.csv', textToBase64(csv));
-    if (sentViaBot) return;
-    // Fallback for testing outside Telegram (regular browser tab) — inside
-    // Telegram's WebView this blob-download approach silently does nothing,
-    // which is exactly the bug this whole function now works around.
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'neuroflow_export.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    haptic('medium');
+  const SYMPTOM_LABELS = {cramps:'Спазмы',bloating:'Вздутие',headache:'Головная боль',breast_tenderness:'Чувств. груди',acne:'Высыпания',fatigue:'Усталость',insomnia:'Бессонница',cravings:'Тяга к сладкому'};
+  const MOOD_LABELS = {euphoric:'Эйфория',calm:'Спокойствие',irritated:'Раздражение',sad:'Грусть',anxious:'Тревога',numb:'Апатия'};
+
+  const downloadXLSX = async () => {
+    if (!window.XLSX) { alert('Библиотека Excel не загрузилась. Проверьте интернет и попробуйте снова.'); return; }
+    setExporting('xlsx');
+    try {
+      const entries = Object.values(store.getState().logs).sort((a,b)=>a.date<b.date?-1:1);
+      const rows = entries.map(l => ({
+        'Дата': l.date,
+        'Менструация': l.isPeriod ? 'Да' : '',
+        'Симптомы': (l.symptoms||[]).map(s=>SYMPTOM_LABELS[s]||s).join(', '),
+        'Энергия (1-5)': l.energyLevel ?? '',
+        'Фокус (1-5)': l.focusLevel ?? '',
+        'Тревожность (1-5)': l.anxietyLevel ?? '',
+        'Сон (1-5)': l.sleepQuality ?? '',
+        'Настроение': MOOD_LABELS[l.mood] || '',
+      }));
+      const ws = window.XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [{wch:12},{wch:12},{wch:30},{wch:13},{wch:11},{wch:16},{wch:10},{wch:14}];
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, 'NeuroFlow');
+      const arrayBuffer = window.XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      const sentViaBot = await sendViaBot('neuroflow_export.xlsx', arrayBufferToBase64(arrayBuffer));
+      setExporting('');
+      if (sentViaBot) return;
+      const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'neuroflow_export.xlsx';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      haptic('medium');
+    } catch(e) { setExporting(''); console.error(e); alert('Не получилось собрать Excel-файл.'); }
+  };
+
+  // Fetches a TTF font once and caches it as base64 on window, so repeated
+  // exports don't re-download ~700KB each time.
+  const loadFontBase64 = async (path, cacheKey) => {
+    if (window[cacheKey]) return window[cacheKey];
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`Не удалось загрузить шрифт: ${path}`);
+    const buf = await res.arrayBuffer();
+    const b64 = arrayBufferToBase64(buf);
+    window[cacheKey] = b64;
+    return b64;
   };
 
   const downloadPDF = async () => {
     if (!window.jspdf) { alert('PDF-библиотека не загрузилась. Проверьте подключение к интернету и повторите попытку.'); return; }
+    setExporting('pdf');
     try {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
-      doc.setFontSize(18); doc.text('NeuroFlow — Отчёт', 14, 22);
-      doc.setFontSize(11); doc.setTextColor(100);
-      doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, 14, 30);
-      doc.text(`Средний цикл: ${profile.averageCycleLength} дней | Менструация: ${profile.averagePeriodLength} дней`, 14, 36);
-      doc.setFontSize(12); doc.setTextColor(0); doc.text('Записи:', 14, 46);
-      let y = 54;
+
+      // Standard jsPDF fonts (Helvetica etc.) have no Cyrillic glyphs at all —
+      // without embedding a Unicode font, Russian text renders as garbage.
+      // DejaVuSans.ttf / DejaVuSans-Bold.ttf must be deployed alongside
+      // app.js and index.html at the site root for this fetch to succeed.
+      const regularB64 = await loadFontBase64('./DejaVuSans.ttf', '__dejavuRegular');
+      const boldB64 = await loadFontBase64('./DejaVuSans-Bold.ttf', '__dejavuBold');
+      doc.addFileToVFS('DejaVuSans.ttf', regularB64);
+      doc.addFont('DejaVuSans.ttf', 'DejaVuSans', 'normal');
+      doc.addFileToVFS('DejaVuSans-Bold.ttf', boldB64);
+      doc.addFont('DejaVuSans-Bold.ttf', 'DejaVuSans', 'bold');
+      doc.setFont('DejaVuSans', 'normal');
+
+      doc.setFontSize(18);
+      doc.text('NeuroFlow — Отчёт', 14, 20);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Дата отчёта: ${new Date().toLocaleDateString('ru-RU')}`, 14, 27);
+      doc.text(`Средний цикл: ${profile.averageCycleLength} дней · Менструация: ${profile.averagePeriodLength} дней`, 14, 33);
+
       const entries = Object.values(store.getState().logs).sort((a,b)=>a.date<b.date?-1:1);
-      entries.forEach(l => {
-        if (y > 270) { doc.addPage(); y = 20; }
-        doc.setFontSize(10);
-        doc.text(`${l.date} | Энергия:${l.energyLevel} Фокус:${l.focusLevel} Тревога:${l.anxietyLevel} Сон:${l.sleepQuality} ${l.isPeriod?'[Менструация]':''}`, 14, y);
-        y += 6;
+      const body = entries.map(l => [
+        l.date,
+        l.isPeriod ? '🩸' : '',
+        (l.symptoms||[]).map(s=>SYMPTOM_LABELS[s]||s).join(', ') || '—',
+        l.energyLevel ?? '', l.focusLevel ?? '', l.anxietyLevel ?? '', l.sleepQuality ?? '',
+        MOOD_LABELS[l.mood] || '—',
+      ]);
+
+      doc.autoTable({
+        startY: 40,
+        head: [['Дата', 'М', 'Симптомы', 'Энерг.', 'Фокус', 'Тревог.', 'Сон', 'Настроение']],
+        body,
+        styles: { font: 'DejaVuSans', fontSize: 9, cellPadding: 3 },
+        headStyles: { font: 'DejaVuSans', fontStyle: 'bold', fillColor: [56, 189, 248], textColor: [255,255,255] },
+        alternateRowStyles: { fillColor: [245, 248, 250] },
+        columnStyles: { 2: { cellWidth: 55 } },
       });
+
       const arrayBuffer = doc.output('arraybuffer');
       const sentViaBot = await sendViaBot('neuroflow_report.pdf', arrayBufferToBase64(arrayBuffer));
+      setExporting('');
       if (sentViaBot) return;
       doc.save('neuroflow_report.pdf');
       haptic('medium');
-    } catch(e) { console.error(e); alert('Не получилось собрать PDF.'); }
+    } catch(e) { setExporting(''); console.error(e); alert('Не получилось собрать PDF: ' + e.message); }
   };
 
   return html`
@@ -1391,8 +1448,8 @@ function Settings() {
 
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Данные</div>
       <${Card} style="margin-bottom:18px;" class="anim">
-        <button onClick=${downloadCSV} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='neuroflow_export.csv' ? 'Отправка...' : '📄 Экспорт в CSV'}</button>
-        <button onClick=${downloadPDF} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='neuroflow_report.pdf' ? 'Отправка...' : '📑 Экспорт в PDF'}</button>
+        <button onClick=${downloadXLSX} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='xlsx' ? 'Отправка...' : '📊 Экспорт в Excel'}</button>
+        <button onClick=${downloadPDF} disabled=${!!exporting} style="width:100%;padding:14px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px;opacity:${exporting?0.6:1};">${exporting==='pdf' ? 'Отправка...' : '📑 Экспорт в PDF'}</button>
         <button onClick=${() => {
           const doReset = () => store.resetAll();
           if (tg?.showConfirm) tg.showConfirm('Удалить все данные приложения? Это нельзя отменить.', ok => { if (ok) doReset(); });
