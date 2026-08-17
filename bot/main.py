@@ -4,6 +4,25 @@ import json, os, requests, urllib.parse
 
 app = Flask(__name__)
 
+# CORS: the frontend (GitHub Pages) and this backend (Vercel) are on different
+# origins. Without these headers, browsers silently block the fetch() call
+# from app.js — no error is thrown client-side (it's swallowed by .catch()),
+# it just looks like "nothing happens" and total_users stays 0 forever.
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
+
+@app.route('/api/<path:_>', methods=['OPTIONS'])
+def cors_preflight(_):
+    # Browsers send an OPTIONS preflight before the actual POST for
+    # cross-origin requests with a JSON body. Must return 200 with the
+    # CORS headers above (added by after_request) or the real request
+    # never gets sent.
+    return '', 200
+
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', '')
 
