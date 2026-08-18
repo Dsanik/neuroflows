@@ -1,3 +1,4 @@
+
 import { render } from 'preact';
 import { useState, useEffect, useMemo, useCallback } from 'preact/hooks';
 import { html } from 'htm/preact';
@@ -1612,4 +1613,38 @@ function App() {
     const openSettings = () => setTab('settings');
     if (tg?.SettingsButton) { tg.SettingsButton.show(); tg.SettingsButton.onClick(openSettings); }
     return () => {
-      unsub
+      unsub();
+      if (tg?.SettingsButton) { tg.SettingsButton.hide(); tg.SettingsButton.offClick(openSettings); }
+    };
+  }, []);
+
+  const changeTab = t => { haptic(); setTab(t); };
+
+  if (!loaded) return html`<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg);color:var(--text2);font-size:15px;">Загрузка...</div>`;
+  if (showTutorial) return html`<${Tutorial} onComplete=${() => setShowTutorial(false)} />`;
+  if (!lps) return html`<${Onboarding} />`;
+
+  return html`
+    <div style="background:var(--bg);color:var(--text);min-height:100vh;position:relative;">
+      ${tab==='dashboard' && html`<${Dashboard} onCheckIn=${()=>setCheckInOpen(true)} />`}
+      ${tab==='planner' && html`<${Planner} />`}
+      ${tab==='calendar' && html`<${Calendar} />`}
+      ${tab==='settings' && html`<${Settings} />`}
+      ${checkInOpen && html`<${CheckIn} onClose=${()=>setCheckInOpen(false)} />`}
+
+      ${!checkInOpen && html`
+      <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
+        ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'},{k:'settings',l:'Настройки',i:'⚙'}].map(t => html`
+          <button key=${t.k} onClick=${()=>changeTab(t.k)} 
+            style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:6px 28px;border-radius:12px;border:none;background:${tab===t.k?'var(--surface)':'none'};color:${tab===t.k?'var(--accent)':'var(--text2)'};font-weight:${tab===t.k?700:500};font-size:10px;cursor:pointer;transition:all 0.2s;"
+          >
+            <span style="font-size:20px;transition:transform 0.2s;transform:${tab===t.k?'scale(1.15)':'scale(1)'};">${t.i}</span>${t.l}
+          </button>
+        `)}
+      </nav>
+      `}
+    </div>
+  `;
+}
+
+render(html`<${App} />`, document.getElementById('root'));
