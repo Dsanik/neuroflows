@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-4';
+const APP_BUILD = '2026.08.17-5';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -361,6 +361,30 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 const isSameDay = (a, b) => a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+
+// Export libraries (jsPDF, jspdf-autotable, XLSX) are heavy and only needed
+// when the person actually taps an export button — loading them eagerly on
+// every app launch would block startup on a normal-sized page. This loads
+// a <script src> on demand and resolves once it's actually ready.
+const _scriptCache = {};
+function loadScript(src) {
+  if (_scriptCache[src]) return _scriptCache[src];
+  _scriptCache[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptCache[src]; reject(new Error(`Не удалось загрузить ${src}`)); };
+    document.head.appendChild(s);
+  });
+  return _scriptCache[src];
+}
+async function loadPdfLibs() {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js');
+}
+async function loadXlsxLib() {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+}
 
 function Scrollable({ children, style }) {
   return html`<div style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;${style || ''}">${children}</div>`;
@@ -1333,8 +1357,14 @@ function Settings() {
   const MOOD_LABELS = {euphoric:'Эйфория',calm:'Спокойствие',irritated:'Раздражение',sad:'Грусть',anxious:'Тревога',numb:'Апатия'};
 
   const downloadXLSX = async () => {
-    if (!window.XLSX) { alert('Библиотека Excel не загрузилась. Проверьте интернет и попробуйте снова.'); return; }
     setExporting('xlsx');
+    try {
+      await loadXlsxLib();
+    } catch (e) {
+      setExporting('');
+      alert('Не получилось загрузить библиотеку Excel. Проверьте интернет и попробуйте снова.');
+      return;
+    }
     try {
       const entries = Object.values(store.getState().logs).sort((a,b)=>a.date<b.date?-1:1);
       const rows = entries.map(l => ({
@@ -1378,9 +1408,19 @@ function Settings() {
   };
 
   const downloadPDF = async () => {
-    if (!window.jspdf) { alert('PDF-библиотека не загрузилась. Проверьте подключение к интернету и повторите попытку.'); return; }
-    if (typeof window.jspdf.jsPDF.API.autoTable !== 'function') { alert('Компонент таблиц для PDF не загрузился. Проверьте подключение к интернету и повторите попытку.'); return; }
     setExporting('pdf');
+    try {
+      await loadPdfLibs();
+    } catch (e) {
+      setExporting('');
+      alert('Не получилось загрузить PDF-библиотеку. Проверьте интернет и попробуйте снова.');
+      return;
+    }
+    if (typeof window.jspdf?.jsPDF?.API?.autoTable !== 'function') {
+      setExporting('');
+      alert('Компонент таблиц для PDF не загрузился. Попробуйте ещё раз.');
+      return;
+    }
     try {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
@@ -1572,25 +1612,4 @@ function App() {
     const openSettings = () => setTab('settings');
     if (tg?.SettingsButton) { tg.SettingsButton.show(); tg.SettingsButton.onClick(openSettings); }
     return () => {
-      unsub();
-      if (tg?.SettingsButton) { tg.SettingsButton.hide(); tg.SettingsButton.offClick(openSettings); }
-    };
-  }, []);
-
-  const changeTab = t => { haptic(); setTab(t); };
-
-  if (!loaded) return html`<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg);color:var(--text2);font-size:15px;">Загрузка...</div>`;
-  if (showTutorial) return html`<${Tutorial} onComplete=${() => setShowTutorial(false)} />`;
-  if (!lps) return html`<${Onboarding} />`;
-
-  return html`
-    <div style="background:var(--bg);color:var(--text);min-height:100vh;position:relative;">
-      ${tab==='dashboard' && html`<${Dashboard} onCheckIn=${()=>setCheckInOpen(true)} />`}
-      ${tab==='planner' && html`<${Planner} />`}
-      ${tab==='calendar' && html`<${Calendar} />`}
-      ${tab==='settings' && html`<${Settings} />`}
-      ${checkInOpen && html`<${CheckIn} onClose=${()=>setCheckInOpen(false)} />`}
-
-      ${!checkInOpen && html`
-      <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
-    
+      unsub
