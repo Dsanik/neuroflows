@@ -1593,4 +1593,3 @@ function App() {
 
       ${!checkInOpen && html`
       <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
-    
