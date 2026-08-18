@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-3';
+const APP_BUILD = '2026.08.17-4';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -75,6 +75,7 @@ let state = {
   palette: { ...DEFAULT_PALETTE }, paletteName: 'default',
   notifSettings: { periodReminder: 3, ovulationAlert: true, pmsAlert: true, time: '09:00' },
   coachMarksSeen: {},
+  pet: null, // { type: 'cat', name: 'Мурка' } — set once user picks a companion
 };
 
 // Migration from v1 to v2
@@ -169,6 +170,8 @@ const store = {
     registerWithBackend();
   },
   markCoachMark: id => { state.coachMarksSeen = { ...state.coachMarksSeen, [id]: true }; saveStore(); pub(); },
+  setPet: pet => { state.pet = pet; saveStore(); pub(); },
+  removePet: () => { state.pet = null; saveStore(); pub(); },
   exportCSV: () => {
     const rows = [['date','isPeriod','symptoms','energyLevel','focusLevel','anxietyLevel','sleepQuality','mood','cervicalMucus']];
     Object.values(state.logs).sort((a,b)=>a.date<b.date?-1:1).forEach(l => {
@@ -228,6 +231,45 @@ const NE = {
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
   food(ph) { return {menstruation:'Железо, витамин C, тёплая еда',follicular:'Белок, зелень, пробиотики',ovulation:'Овощи, антиоксиданты, омега-3',luteal:'Сложные углеводы, магний, витамин B6'}[ph]; },
   intim(ph) { return {menstruation:'Обычно в этой фазе: реактивное либидо, потребность в нежности',follicular:'Обычно в этой фазе: спонтанное желание, openness к экспериментам',ovulation:'Обычно в этой фазе: пик либидо, максимальная фертильность',luteal:'Обычно в этой фазе: мягкость, потребность в эмоциональной близости'}[ph]; },
+
+  // ===== Pet companion =====
+  PET_TYPES: [
+    { id: 'cat', emoji: '🐱', label: 'Кот' },
+    { id: 'fox', emoji: '🦊', label: 'Лиса' },
+    { id: 'bunny', emoji: '🐰', label: 'Зайка' },
+    { id: 'panda', emoji: '🐼', label: 'Панда' },
+    { id: 'owl', emoji: '🦉', label: 'Сова' },
+    { id: 'dragon', emoji: '🐲', label: 'Дракончик' },
+  ],
+  petEmoji(type) { return (this.PET_TYPES.find(p => p.id === type) || this.PET_TYPES[0]).emoji; },
+  petMessage(pet, profile, log) {
+    if (!pet || !profile) return '';
+    const ph = profile.phase;
+    // Mood takes priority — reacting to how the person actually feels beats a generic phase line.
+    if (log?.mood) {
+      const moodLines = {
+        euphoric: ['Обожаю, когда ты в таком настроении! ✨', 'Твоя энергия заразительна!'],
+        calm: ['Спокойствие — это тоже сила 🌿', 'Хорошо, что тебе сейчас легко на душе.'],
+        irritated: ['Дыши. Я рядом, и это пройдёт.', 'Раздражение — нормально. Не суди себя за это.'],
+        sad: ['Обнял бы, если бы мог 🤍', 'Грустить — тоже можно. Я никуда не денусь.'],
+        anxious: ['Тревога врёт больше, чем кажется. Ты справишься.', 'Одна минута за раз — этого достаточно.'],
+        numb: ['Даже пустота — это состояние, а не приговор.', 'Не обязательно что-то чувствовать сильно. Просто будь.'],
+      };
+      const arr = moodLines[log.mood];
+      if (arr) return arr[new Date().getDate() % arr.length];
+    }
+    if (log?.symptoms?.length > 0) {
+      return 'Заметил, что тебе физически непросто сегодня. Позаботься о себе, ладно?';
+    }
+    const phaseLines = {
+      menstruation: ['Сейчас можно и нужно сбавить темп. Я подожду.', 'Тёплый плед и ты — звучит неплохо, да?'],
+      follicular: ['Энергия растёт — самое время для чего-то нового!', 'Чувствую, ты полна сил. Погнали!'],
+      ovulation: ['Ты сегодня особенно в ресурсе. Пользуйся моментом.', 'Уверенность зашкаливает — это твоя фаза!'],
+      luteal: ['Возможна лёгкая чувствительность — это нормально.', 'Хорошее время для фокуса и завершения дел.'],
+    };
+    const arr = phaseLines[ph] || ['Я рядом, что бы ни происходило.'];
+    return arr[new Date().getDate() % arr.length];
+  },
 };
 
 function dayOfCycleForDate(date, lps, cycleLength) {
@@ -532,10 +574,12 @@ function Onboarding() {
 
 function Dashboard({ onCheckIn }) {
   const [profile, setP] = useState(store.getState().currentProfile);
-  useEffect(() => store.sub(s => setP(s.currentProfile)), []);
+  const [pet, setPetState] = useState(store.getState().pet);
+  useEffect(() => store.sub(s => { setP(s.currentProfile); setPetState(s.pet); }), []);
 
   if (!profile) return html`<div style="padding:40px 20px;color:var(--text2);text-align:center;font-size:15px;">Загрузка...</div>`;
 
+  const todayLog = store.getState().logs[todayStr()];
   const c = NE.pc(profile.phase);
   const circ = 2 * Math.PI * 90;
   const profileState = store.getState().profile;
@@ -578,6 +622,18 @@ function Dashboard({ onCheckIn }) {
           <div style="font-size:11px;color:var(--text2);margin-top:8px;opacity:0.7;font-weight:500;background:var(--surface);padding:4px 12px;border-radius:20px;border:1px solid var(--border);">ЦНС: ${Math.round(profile.cnsCapacity)}%</div>
         </div>
       </div>
+
+      ${pet && html`
+        <${Card} style="margin-bottom:18px;background:${c}08;border-color:${c}25;" class="anim">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-size:40px;flex-shrink:0;filter:drop-shadow(0 4px 8px rgba(0,0,0,0.2));animation:float 3s ease-in-out infinite;">${NE.petEmoji(pet.type)}</div>
+            <div style="flex:1;">
+              <div style="font-size:12px;font-weight:800;color:${c};margin-bottom:3px;">${pet.name}</div>
+              <div style="font-size:13px;color:var(--text);line-height:1.5;font-weight:500;">${NE.petMessage(pet, profile, todayLog)}</div>
+            </div>
+          </div>
+        <//>
+      `}
 
       ${delayDays > 0 && html`
         <${Card} style="margin-bottom:18px;background:${theme.danger}10;border-color:${theme.danger}30;" class="anim">
@@ -1240,7 +1296,9 @@ function Settings() {
   const [palette, setPal] = useState(store.getState().palette);
   const [paletteName, setPalName] = useState(store.getState().paletteName);
   const [notif, setNotif] = useState(store.getState().notifSettings);
-  useEffect(() => store.sub(s => { setP(s.profile); setPal(s.palette); setPalName(s.paletteName); setNotif(s.notifSettings); }), []);
+  const [pet, setPetState] = useState(store.getState().pet);
+  const [petNameDraft, setPetNameDraft] = useState('');
+  useEffect(() => store.sub(s => { setP(s.profile); setPal(s.palette); setPalName(s.paletteName); setNotif(s.notifSettings); setPetState(s.pet); }), []);
 
   if (!profile) return html`<div style="padding:40px 20px;color:var(--text2);text-align:center;">Загрузка...</div>`;
 
@@ -1422,6 +1480,33 @@ function Settings() {
         `)}
       <//>
 
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Питомец-компаньон</div>
+      <${Card} style="margin-bottom:18px;" class="anim">
+        ${pet ? html`
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div style="font-size:36px;">${NE.petEmoji(pet.type)}</div>
+            <div style="flex:1;">
+              <div style="font-size:15px;font-weight:800;color:var(--text);">${pet.name}</div>
+              <div style="font-size:12px;color:var(--text2);">Твой компаньон в приложении</div>
+            </div>
+            <button onClick=${()=>{store.removePet();haptic();}} style="background:none;border:1px solid ${theme.danger}40;color:${theme.danger};border-radius:10px;padding:8px 12px;font-size:12px;font-weight:600;cursor:pointer;">Убрать</button>
+          </div>
+        ` : html`
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Выбери питомца — он будет поддерживать тебя на главном экране, реагируя на твою фазу и настроение.</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">
+            ${NE.PET_TYPES.map(p => html`
+              <button key=${p.id} onClick=${()=>{haptic('medium');store.setPet({type:p.id, name: petNameDraft.trim() || p.label});}}
+                style="padding:14px 8px;border-radius:14px;border:1.5px solid var(--border);background:var(--surface-hover);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;">
+                <span style="font-size:28px;">${p.emoji}</span>
+                <span style="font-size:11px;color:var(--text2);font-weight:600;">${p.label}</span>
+              </button>
+            `)}
+          </div>
+          <input value=${petNameDraft} onInput=${e=>setPetNameDraft(e.target.value)} placeholder="Имя питомца (необязательно)"
+            style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:14px;-webkit-appearance:none;" />
+        `}
+      <//>
+
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Цвета фаз</div>
       <${Card} style="margin-bottom:18px;" class="anim">
         <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:12px;margin-bottom:16px;">
@@ -1508,17 +1593,4 @@ function App() {
 
       ${!checkInOpen && html`
       <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
-        ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'},{k:'settings',l:'Настройки',i:'⚙'}].map(t => html`
-          <button key=${t.k} onClick=${()=>changeTab(t.k)} 
-            style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:6px 28px;border-radius:12px;border:none;background:${tab===t.k?'var(--surface)':'none'};color:${tab===t.k?'var(--accent)':'var(--text2)'};font-weight:${tab===t.k?700:500};font-size:10px;cursor:pointer;transition:all 0.2s;"
-          >
-            <span style="font-size:20px;transition:transform 0.2s;transform:${tab===t.k?'scale(1.15)':'scale(1)'};">${t.i}</span>${t.l}
-          </button>
-        `)}
-      </nav>
-      `}
-    </div>
-  `;
-}
-
-render(html`<${App} />`, document.getElementById('root'));
+    
