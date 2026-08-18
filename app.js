@@ -58,7 +58,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-2';
+const APP_BUILD = '2026.08.17-3';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -1321,6 +1321,7 @@ function Settings() {
 
   const downloadPDF = async () => {
     if (!window.jspdf) { alert('PDF-библиотека не загрузилась. Проверьте подключение к интернету и повторите попытку.'); return; }
+    if (typeof window.jspdf.jsPDF.API.autoTable !== 'function') { alert('Компонент таблиц для PDF не загрузился. Проверьте подключение к интернету и повторите попытку.'); return; }
     setExporting('pdf');
     try {
       const { jsPDF } = window.jspdf;
