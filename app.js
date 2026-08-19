@@ -59,7 +59,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-6';
+const APP_BUILD = '2026.08.17-7';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -254,6 +254,23 @@ const NE = {
   work(ph) { return {menstruation:'Рутинные задачи, планирование',follicular:'Новые проекты, обучение, переговоры',ovulation:'Публичные выступления, продажи, нетворкинг',luteal:'Глубокий анализ, завершение задач'}[ph]; },
   sport(ph) { return {menstruation:'Пилатес, йога, растяжка',follicular:'Кроссфит, бег, силовые',ovulation:'HIIT, танцы, командный спорт',luteal:'Йога, плавание, низкая интенсивность'}[ph]; },
   food(ph) { return {menstruation:'Железо, витамин C, тёплая еда',follicular:'Белок, зелень, пробиотики',ovulation:'Овощи, антиоксиданты, омега-3',luteal:'Сложные углеводы, магний, витамин B6'}[ph]; },
+  // "Food as medicine" — maps today's logged symptoms/cravings to concrete
+  // food suggestions, per the "translator between hormones and the plate"
+  // concept. Deliberately no moralizing language ("you broke your plan") —
+  // just what might help, framed as physiology, not willpower.
+  FOOD_SUPPORT: {
+    headache: { label: 'Головная боль', tip: 'Магний помогает при гормональной мигрени, а тирамин может её провоцировать.', foods: ['Шпинат', 'Семечки тыквы', 'Авокадо'], avoid: ['Выдержанный сыр', 'Красное вино'] },
+    bloating: { label: 'Вздутие', tip: 'Мягкие мочегонные продукты и меньше соли — без фанатизма.', foods: ['Огурцы', 'Арбуз', 'Зелёный чай'], avoid: [] },
+    cramps: { label: 'Спазмы', tip: 'Тепло и омега-3 расслабляют гладкую мускулатуру.', foods: ['Имбирный чай', 'Куркума', 'Жирная рыба', 'Льняное семя'], avoid: [] },
+    fatigue: { label: 'Усталость', tip: 'Если это менструация — вероятна нехватка железа.', foods: ['Говядина', 'Печень', 'Чечевица', 'Витамин C для усвоения'], avoid: [] },
+    cravings: { label: 'Тяга к сладкому', tip: 'В лютеиновой фазе падает чувствительность к инсулину — это физиология, не слабость.', foods: ['Финики с орехами', 'Тёмный шоколад 70%+', 'Печёные яблоки с корицей'], avoid: [] },
+  },
+  cravingFood(craving) {
+    if (craving === 'sweet') return { tip: 'Тяга к сладкому — обычно физиология, не слабость воли.', foods: ['Финики с орехами', 'Тёмный шоколад 70%+', 'Банан с ореховой пастой'] };
+    if (craving === 'salty') return { tip: 'Тяга к солёному иногда связана с задержкой жидкости или стрессом.', foods: ['Оливки', 'Солёные орехи (умеренно)', 'Мисо-суп'] };
+    return null;
+  },
+
   intim(ph) { return {menstruation:'Обычно в этой фазе: реактивное либидо, потребность в нежности',follicular:'Обычно в этой фазе: спонтанное желание, openness к экспериментам',ovulation:'Обычно в этой фазе: пик либидо, максимальная фертильность',luteal:'Обычно в этой фазе: мягкость, потребность в эмоциональной близости'}[ph]; },
 
   // ===== Pet companion =====
@@ -824,12 +841,14 @@ function CalorieTracker() {
         </div>
       `}
 
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
         <input value=${name} onInput=${e=>setName(e.target.value)} placeholder="Что съела..."
-          style="flex:1;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;" />
-        <input value=${cal} onInput=${e=>setCal(e.target.value.replace(/\D/g,''))} type="number" inputmode="numeric" placeholder="ккал"
-          style="width:80px;padding:12px 10px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;" />
-        <button onClick=${submit} style="padding:0 18px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:18px;font-weight:700;cursor:pointer;">+</button>
+          style="width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;-webkit-appearance:none;" />
+        <div style="display:flex;gap:8px;">
+          <input value=${cal} onInput=${e=>setCal(e.target.value.replace(/\D/g,''))} type="number" inputmode="numeric" placeholder="ккал"
+            style="flex:1;min-width:0;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;-webkit-appearance:none;" />
+          <button onClick=${submit} style="flex-shrink:0;width:44px;height:44px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:20px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">+</button>
+        </div>
       </div>
     <//>
   `;
@@ -916,6 +935,34 @@ function Planner() {
         ${tab==='food' && html`
           <div style="display:flex;flex-direction:column;gap:14px;">
             <${CalorieTracker} />
+            ${(() => {
+              const todayLog = store.getState().logs[date];
+              const activeSupport = (todayLog?.symptoms || []).map(s => NE.FOOD_SUPPORT[s]).filter(Boolean);
+              const cravingInfo = todayLog?.craving && todayLog.craving !== 'none' ? NE.cravingFood(todayLog.craving) : null;
+              if (activeSupport.length === 0 && !cravingInfo) return '';
+              return html`
+                <${Card} style="border-color:${theme.success}30;background:${theme.success}08;">
+                  <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${theme.success};margin-bottom:10px;">Еда как поддержка сегодня</div>
+                  ${activeSupport.map((s,i) => html`
+                    <div key=${i} style="margin-bottom:${i<activeSupport.length-1||cravingInfo?'14px':'0'};">
+                      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px;">${s.label}</div>
+                      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:6px;">${s.tip}</div>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${s.foods.map(f => html`<span key=${f} style="padding:5px 10px;border-radius:8px;background:var(--surface);font-size:11px;font-weight:600;color:var(--text);">${f}</span>`)}
+                      </div>
+                    </div>
+                  `)}
+                  ${cravingInfo && html`
+                    <div style="${activeSupport.length>0?'padding-top:14px;border-top:1px solid '+theme.success+'25;':''}">
+                      <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:6px;">${cravingInfo.tip}</div>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${cravingInfo.foods.map(f => html`<span key=${f} style="padding:5px 10px;border-radius:8px;background:var(--surface);font-size:11px;font-weight:600;color:var(--text);">${f}</span>`)}
+                      </div>
+                    </div>
+                  `}
+                <//>
+              `;
+            })()}
             <${Card} glow style="border-color:${c}30;background:${c}08;">
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${c};margin-bottom:8px;">Питание фазы</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.food(ph)}</div>
@@ -1163,6 +1210,7 @@ const defaultLog = {
   date: todayStr(), isPeriod: false, energyLevel: 3, focusLevel: 3, anxietyLevel: 2,
   mood: 'calm', libidoLevel: 2, intimacy: { occurred: false, type: 'none', protection: null, orgasm: false, discomfort: false },
   sleepQuality: 3, symptoms: [], cervicalMucus: 'dry',
+  appetiteLevel: 3, craving: 'none', // 'none' | 'sweet' | 'salty'
 };
 
 function CheckIn({ onClose }) {
@@ -1406,6 +1454,22 @@ function CheckIn({ onClose }) {
                   </button>
                 `)}
               </div>
+            </div>
+
+            <div style="margin-top:28px;">${slider('Аппетит сегодня', 'appetiteLevel')}</div>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px;">
+              <span style="font-size:14px;color:var(--text2);font-weight:600;">Тянет на что-то особенное?</span>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+                ${[{k:'none',l:'Ничего',i:'🙂'},{k:'sweet',l:'Сладкое',i:'🍫'},{k:'salty',l:'Солёное',i:'🥨'}].map(cr => html`
+                  <button key=${cr.k} onClick=${()=>{haptic();upd({craving:cr.k});}}
+                    style="padding:14px 8px;border-radius:16px;border:2px solid ${log.craving===cr.k?'var(--accent)':'var(--border)'};background:${log.craving===cr.k?'var(--accent-soft)':'var(--surface)'};color:var(--text);font-size:12px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;align-items:center;gap:6px;"
+                  >
+                    <span style="font-size:22px;">${cr.i}</span>
+                    <span style="font-weight:600;">${cr.l}</span>
+                  </button>
+                `)}
+              </div>
+              ${log.craving !== 'none' && html`<div style="font-size:12px;color:var(--text2);line-height:1.5;padding:10px 12px;background:var(--surface);border-radius:12px;margin-top:4px;">Тяга к ${log.craving==='sweet'?'сладкому':'солёному'} — это физиология, не слабость воли. В "Планере" на вкладке "Питание" покажу, чем это можно поддержать.</div>`}
             </div>
           </div>
         `}
