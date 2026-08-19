@@ -59,7 +59,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-5';
+const APP_BUILD = '2026.08.17-6';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -74,9 +74,11 @@ let state = {
   profile: null, logs: {}, lastPeriodStart: null, currentProfile: null, draftLog: null, tutorialSeen: false,
   taskChecks: {}, customTasks: { work: [], body: [], food: [] },
   palette: { ...DEFAULT_PALETTE }, paletteName: 'default',
-  notifSettings: { periodReminder: 3, ovulationAlert: true, pmsAlert: true, time: '09:00' },
+  notifSettings: { periodReminder: 0, ovulationAlert: false, pmsAlert: false, time: '09:00' },
   coachMarksSeen: {},
   pet: null, // { type: 'cat', name: 'Мурка' } — set once user picks a companion
+  calorieGoal: 2000,
+  meals: {}, // { [date]: [{id, name, calories}] }
 };
 
 // Migration from v1 to v2
@@ -173,6 +175,16 @@ const store = {
   markCoachMark: id => { state.coachMarksSeen = { ...state.coachMarksSeen, [id]: true }; saveStore(); pub(); },
   setPet: pet => { state.pet = pet; saveStore(); pub(); },
   removePet: () => { state.pet = null; saveStore(); pub(); },
+  setCalorieGoal: goal => { state.calorieGoal = goal; saveStore(); pub(); },
+  addMeal: (date, meal) => {
+    const dayMeals = [...(state.meals[date] || []), { id: 'm'+Date.now()+Math.random().toString(36).slice(2,6), ...meal }];
+    state.meals = { ...state.meals, [date]: dayMeals };
+    saveStore(); pub();
+  },
+  removeMeal: (date, id) => {
+    state.meals = { ...state.meals, [date]: (state.meals[date]||[]).filter(m => m.id !== id) };
+    saveStore(); pub();
+  },
   exportCSV: () => {
     const rows = [['date','isPeriod','symptoms','energyLevel','focusLevel','anxietyLevel','sleepQuality','mood','cervicalMucus']];
     Object.values(state.logs).sort((a,b)=>a.date<b.date?-1:1).forEach(l => {
@@ -188,7 +200,18 @@ const NE = {
   getEstrogen(d, L=28) { const ov=L-14; return d<=ov ? Math.exp(-Math.pow(d-ov,2)/10) : 0.3+0.4*Math.exp(-Math.pow(d-(ov+7),2)/15); },
   getProgesterone(d, L=28) { const ov=L-14; return d<=ov ? 0.05 : Math.max(0, Math.sin((Math.PI*(d-ov))/14)); },
   getTestosterone(d, L=28) { const ov=L-14; return Math.exp(-Math.pow(d-ov,2)/4); },
-  cns(e, p, s=4) { let b=e*0.6-p*0.3+0.5; return Math.min(100, Math.max(0, b*50+s*10)); },
+  cns(e, p, s=4, todayLog=null) {
+    let b = e*0.6 - p*0.3 + 0.5;
+    let val = b*50 + s*10;
+    // Layer in today's actual check-in (if logged) — this is the one part
+    // of the dashboard that should move based on how the person says they
+    // feel today, rather than only the phase-based hormone model.
+    if (todayLog) {
+      if (typeof todayLog.energyLevel === 'number') val += (todayLog.energyLevel - 3) * 6;
+      if (typeof todayLog.anxietyLevel === 'number') val -= (todayLog.anxietyLevel - 2) * 5;
+    }
+    return Math.min(100, Math.max(0, val));
+  },
   phase(d, L=28) { const ov=L-14; if(d<=5)return'menstruation'; if(d<ov)return'follicular'; if(d===ov)return'ovulation'; return'luteal'; },
   // Fertile window: ~5 days before ovulation (sperm can survive that long) + the ovulation day itself.
   // Tiers loosely follow published conception-probability-by-cycle-day data (Wilcox et al. 1995) — approximate, not personalized.
@@ -200,7 +223,7 @@ const NE = {
     return 'low';
   },
   dayOf(lps, L=28) { const st=new Date(lps+'T00:00:00').getTime(); const now=Date.now(); const diff=Math.floor((now-st)/(86400000)); const day=diff+1; return day>0?day:1; },
-  prof(day, L=28, sleep=4) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep), phase:this.phase(day,L), dayOfCycle:day}; },
+  prof(day, L=28, sleep=4, todayLog=null) { const e=this.getEstrogen(day,L); const p=this.getProgesterone(day,L); const t=this.getTestosterone(day,L); return {estrogen:e, progesterone:p, testosterone:t, cnsCapacity:this.cns(e,p,sleep,todayLog), phase:this.phase(day,L), dayOfCycle:day}; },
   pc(ph) { return {menstruation:'#EF4444',follicular:'#EC4899',ovulation:'#38BDF8',luteal:'#6366F1'}[ph]; },
   pn(ph) { return {menstruation:'Менструация',follicular:'Фолликулярная',ovulation:'Овуляция',luteal:'Лютеиновая'}[ph]; },
   // ===== 6-category display model — for calendar visualization only. =====
@@ -319,7 +342,8 @@ function compute() {
   const y = new Date(); y.setDate(y.getDate()-1);
   const yk = localISO(y);
   const ylog = state.logs[yk];
-  state.currentProfile = NE.prof(day, profile.averageCycleLength, ylog?.sleepQuality ?? 4);
+  const tlog = state.logs[todayStr()];
+  state.currentProfile = NE.prof(day, profile.averageCycleLength, ylog?.sleepQuality ?? 4, tlog);
   saveStore();
 }
 
@@ -536,7 +560,6 @@ function Onboarding() {
     const p = store.getState().profile;
     if (p) store.setProfile({ ...p, averageCycleLength: cycle, averagePeriodLength: period });
     store.setLps(date);
-    registerWithBackend();
     notify('success');
   };
 
@@ -689,6 +712,7 @@ function Dashboard({ onCheckIn }) {
             </div>
           </div>
         `)}
+        <div style="font-size:11px;color:var(--text2);line-height:1.5;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">Это типичный паттерн для твоей фазы цикла — не измерение конкретно твоих гормонов (для этого нужен анализ крови). А вот блок «ресурс» ниже уже учитывает то, что ты вписываешь в чек-ин.</div>
       <//>
 
       <${Card} style="margin-bottom:18px;background:${c}08;border-color:${c}25;" class="anim">
@@ -734,6 +758,80 @@ function AddTaskInput({ onAdd }) {
         style="flex:1;padding:14px 16px;border-radius:16px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;" />
       <button onClick=${submit} style="padding:0 20px;border-radius:16px;border:none;background:var(--accent);color:#fff;font-size:20px;font-weight:700;cursor:pointer;">+</button>
     </div>
+  `;
+}
+
+function CalorieTracker() {
+  const date = todayStr();
+  const [goal, setGoal] = useState(store.getState().calorieGoal);
+  const [meals, setMeals] = useState(store.getState().meals[date] || []);
+  const [name, setName] = useState('');
+  const [cal, setCal] = useState('');
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState(String(goal));
+  useEffect(() => store.sub(s => { setGoal(s.calorieGoal); setMeals(s.meals[date] || []); }), []);
+
+  const total = meals.reduce((sum, m) => sum + (m.calories || 0), 0);
+  const pct = Math.min(100, (total / goal) * 100);
+  const over = total > goal;
+
+  const submit = () => {
+    const c = parseInt(cal, 10);
+    if (!name.trim() || !c || c <= 0) return;
+    store.addMeal(date, { name: name.trim(), calories: c });
+    setName(''); setCal(''); haptic('medium');
+  };
+  const saveGoal = () => {
+    const g = parseInt(goalDraft, 10);
+    if (g > 0) store.setCalorieGoal(g);
+    setEditingGoal(false); haptic();
+  };
+
+  return html`
+    <${Card} style="margin-bottom:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:var(--text2);">Питание сегодня</div>
+        ${editingGoal ? html`
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input value=${goalDraft} onInput=${e=>setGoalDraft(e.target.value.replace(/\D/g,''))} type="number" inputmode="numeric"
+              style="width:70px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-hover);color:var(--text);font-size:13px;" />
+            <button onClick=${saveGoal} style="background:var(--accent);border:none;border-radius:8px;color:#fff;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">OK</button>
+          </div>
+        ` : html`
+          <button onClick=${()=>{setGoalDraft(String(goal));setEditingGoal(true);}} style="background:none;border:none;color:var(--text2);font-size:12px;cursor:pointer;">Цель: ${goal} ккал ✎</button>
+        `}
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+        <span style="font-size:24px;font-weight:800;color:${over?theme.danger:'var(--text)'};">${total}</span>
+        <span style="font-size:13px;color:var(--text2);">из ${goal} ккал</span>
+      </div>
+      <div style="height:10px;border-radius:999px;overflow:hidden;background:var(--bg);margin-bottom:16px;">
+        <div style="height:100%;border-radius:999px;background:${over?theme.danger:'var(--accent)'};width:${pct}%;transition:width 0.4s ease;" />
+      </div>
+
+      ${meals.length > 0 && html`
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;">
+          ${meals.map(m => html`
+            <div key=${m.id} style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:12px;background:var(--surface-hover);">
+              <span style="font-size:13px;color:var(--text);font-weight:500;">${m.name}</span>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:13px;color:var(--text2);font-weight:600;">${m.calories} ккал</span>
+                <button onClick=${()=>{store.removeMeal(date, m.id);haptic();}} style="background:none;border:none;color:var(--text2);font-size:14px;cursor:pointer;">✕</button>
+              </div>
+            </div>
+          `)}
+        </div>
+      `}
+
+      <div style="display:flex;gap:8px;">
+        <input value=${name} onInput=${e=>setName(e.target.value)} placeholder="Что съела..."
+          style="flex:1;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;" />
+        <input value=${cal} onInput=${e=>setCal(e.target.value.replace(/\D/g,''))} type="number" inputmode="numeric" placeholder="ккал"
+          style="width:80px;padding:12px 10px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;" />
+        <button onClick=${submit} style="padding:0 18px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:18px;font-weight:700;cursor:pointer;">+</button>
+      </div>
+    <//>
   `;
 }
 
@@ -817,6 +915,7 @@ function Planner() {
 
         ${tab==='food' && html`
           <div style="display:flex;flex-direction:column;gap:14px;">
+            <${CalorieTracker} />
             <${Card} glow style="border-color:${c}30;background:${c}08;">
               <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.12em;color:${c};margin-bottom:8px;">Питание фазы</div>
               <div style="font-size:15px;color:var(--text);line-height:1.6;font-weight:500;">${NE.food(ph)}</div>
@@ -1498,16 +1597,13 @@ function Settings() {
 
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Уведомления</div>
       <${Card} style="margin-bottom:18px;" class="anim">
-        <div style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:16px;padding:10px 12px;background:${theme.accentGlow};border-radius:12px;">
-          Пуши требуют серверной части бота — сейчас настройки сохраняются, но реальные уведомления работают только после того, как я подключу бэкенд (см. инструкцию в чате).
-        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <span style="font-size:14px;color:var(--text);font-weight:500;">За сколько дней напомнить о месячных</span>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:20px;">
-          ${[1,2,3,5,7].map(n => html`
-            <button key=${n} onClick=${()=>store.setNotifSettings({periodReminder:n})}
-              style="flex:1;height:38px;border-radius:10px;border:1.5px solid ${notif.periodReminder===n?'var(--accent)':'var(--border)'};background:${notif.periodReminder===n?'var(--accent)':'var(--surface-hover)'};color:${notif.periodReminder===n?'#fff':'var(--text)'};font-size:13px;font-weight:700;cursor:pointer;">${n}</button>
+          ${[{v:0,l:'Выкл'},{v:1,l:'1'},{v:2,l:'2'},{v:3,l:'3'},{v:5,l:'5'},{v:7,l:'7'}].map(o => html`
+            <button key=${o.v} onClick=${()=>store.setNotifSettings({periodReminder:o.v})}
+              style="flex:1;height:38px;border-radius:10px;border:1.5px solid ${notif.periodReminder===o.v?'var(--accent)':'var(--border)'};background:${notif.periodReminder===o.v?'var(--accent)':'var(--surface-hover)'};color:${notif.periodReminder===o.v?'#fff':'var(--text)'};font-size:13px;font-weight:700;cursor:pointer;">${o.l}</button>
           `)}
         </div>
         ${[['ovulationAlert','Уведомлять в день овуляции'],['pmsAlert','Уведомлять в начале ПМС']].map(([k,label]) => html`
