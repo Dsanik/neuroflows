@@ -122,6 +122,43 @@ def cron():
     return jsonify({'ok': True, 'sent': sent, 'total_users': len(chat_ids)})
 
 
+# Broadcast an update/changelog message to every registered user. Call this
+# manually (or from a CI step) after deploying frontend changes — it does not
+# run automatically. Protected by the same CRON_SECRET as /api/cron since
+# both are "admin-only" actions.
+@app.route('/api/announce', methods=['POST'])
+def announce():
+    auth = request.headers.get('Authorization', '')
+    if not CRON_SECRET or auth != f'Bearer {CRON_SECRET}':
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not KV_URL or not KV_TOKEN:
+        return jsonify({'error': 'KV storage not configured'}), 500
+
+    body = request.get_json() or {}
+    text = body.get('text')
+    if not text:
+        return jsonify({'error': 'text required'}), 400
+
+    chat_ids = kv_smembers('users:all')
+    sent, failed = 0, 0
+    for chat_id in chat_ids:
+        try:
+            requests.post(
+                f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
+                json={
+                    'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML',
+                    'reply_markup': {'inline_keyboard': [[{
+                        "text": "Открыть NeuroFlow",
+                        "web_app": {"url": MINI_APP_URL}
+                    }]]}
+                }, timeout=10)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            print(f'Failed to announce to {chat_id}: {e}')
+    return jsonify({'ok': True, 'sent': sent, 'failed': failed, 'total_users': len(chat_ids)})
+
+
 @app.route('/api/notify', methods=['POST'])
 def notify():
     body = request.get_json() or {}
