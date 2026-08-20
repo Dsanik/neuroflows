@@ -41,8 +41,21 @@
     overscroll-behavior-y: none;
     background: var(--bg);
     color: var(--text);
+    /* On desktop (Telegram Desktop / browser), the surrounding page background
+       shows behind the centered app panel below — dark to match the app. */
+    display: flex;
+    justify-content: center;
   }
-  #root { min-height: 100%; }
+  /* Desktop/tablet: keeps the app a narrow centered panel instead of
+     stretching full window width. On phones this is a no-op since the
+     screen itself is already narrower than 520px. */
+  #root {
+    width: 100%;
+    max-width: 520px;
+    min-height: 100dvh;
+    padding-top: env(safe-area-inset-top, 0px);
+    position: relative;
+  }
   input, button, select, textarea { font-family: inherit; outline: none; }
 
   /* Range slider */
@@ -93,7 +106,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="module" src="./app.js?v=2026.08.17-6"></script>
+<script type="module" src="./app.js?v=2026.08.17-8"></script>
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(()=>{});

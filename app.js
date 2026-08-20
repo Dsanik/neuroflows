@@ -59,7 +59,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-7';
+const APP_BUILD = '2026.08.17-8';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -547,7 +547,7 @@ function Tutorial({ onComplete }) {
   const s = steps[step];
 
   return html`
-    <div style="position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;flex-direction:column;justify-content:center;padding:28px;gap:40px;animation:fadeIn 0.4s ease;">
+    <div style="position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:520px;z-index:200;background:var(--bg);display:flex;flex-direction:column;justify-content:center;padding:28px;gap:40px;animation:fadeIn 0.4s ease;">
       <div style="text-align:center;" class="anim">
         <div style="font-size:72px;margin-bottom:20px;filter:drop-shadow(0 12px 24px rgba(0,0,0,0.3));animation:pulse 3s ease infinite;">${s.icon}</div>
         <h2 style="font-size:26px;font-weight:800;color:var(--text);margin-bottom:14px;letter-spacing:-0.02em;">${s.title}</h2>
@@ -1310,7 +1310,7 @@ function CheckIn({ onClose }) {
   const animClass = direction === 'next' ? 'slide-right' : 'slide-left';
 
   return html`
-    <div style="position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:var(--bg);color:var(--text);animation:fadeIn 0.25s ease;">
+    <div style="position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:520px;z-index:60;display:flex;flex-direction:column;background:var(--bg);color:var(--text);animation:fadeIn 0.25s ease;">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2);">
         <button onClick=${back} style="font-size:14px;padding:6px 10px;background:none;border:none;color:var(--text2);font-weight:600;cursor:pointer;border-radius:8px;transition:all 0.15s;"
           onTouchStart=${e=>e.currentTarget.style.background='var(--surface)'} onTouchEnd=${e=>e.currentTarget.style.background='transparent'}
@@ -1793,7 +1793,7 @@ function App() {
       ${checkInOpen && html`<${CheckIn} onClose=${()=>setCheckInOpen(false)} />`}
 
       ${!checkInOpen && html`
-      <nav style="position:fixed;bottom:0;left:0;right:0;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
+      <nav style="position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:520px;background:rgba(15,20,25,0.85);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:50;display:flex;justify-content:space-around;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));">
         ${[{k:'dashboard',l:'Главная',i:'◉'},{k:'planner',l:'Планер',i:'☰'},{k:'calendar',l:'Календарь',i:'◎'},{k:'settings',l:'Настройки',i:'⚙'}].map(t => html`
           <button key=${t.k} onClick=${()=>changeTab(t.k)} 
             style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:6px 28px;border-radius:12px;border:none;background:${tab===t.k?'var(--surface)':'none'};color:${tab===t.k?'var(--accent)':'var(--text2)'};font-weight:${tab===t.k?700:500};font-size:10px;cursor:pointer;transition:all 0.2s;"
