@@ -236,3 +236,80 @@ def webhook():
         except Exception as e:
             print(f'Failed to send welcome message: {e}')
     return jsonify({'ok': True})
+
+
+# Not linked from anywhere in the app — reachable only if you know the URL.
+# The CRON_SECRET is typed in by hand each visit and never stored, so it
+# isn't sitting in this page's HTML/JS for anyone who stumbles on the URL
+# to read straight out of view-source.
+ADMIN_PAGE = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NeuroFlow — Admin</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0f1419; color: #f1f5f9; margin: 0; padding: 24px 20px 60px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #94a3b8; font-size: 13px; margin-top: 0; margin-bottom: 24px; }
+  label { display: block; font-size: 13px; color: #94a3b8; font-weight: 600; margin-bottom: 8px; margin-top: 18px; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(148,163,184,0.2); background: #1e293b; color: #f1f5f9; font-size: 14px; font-family: inherit; }
+  textarea { min-height: 120px; resize: vertical; }
+  button { margin-top: 20px; width: 100%; padding: 14px; border-radius: 14px; border: none; background: #38bdf8; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: 0.5; }
+  #result { margin-top: 16px; padding: 12px 14px; border-radius: 12px; font-size: 13px; white-space: pre-wrap; display: none; }
+  #result.ok { display: block; background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.3); }
+  #result.err { display: block; background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+</style>
+</head>
+<body>
+  <h1>Рассылка обновления</h1>
+  <p class="sub">Уйдёт всем зарегистрированным пользователям бота.</p>
+
+  <label for="secret">CRON_SECRET</label>
+  <input id="secret" type="password" placeholder="вставь секрет" autocomplete="off" />
+
+  <label for="text">Текст сообщения</label>
+  <textarea id="text" placeholder="🎉 Новое в NeuroFlow:&#10;• ..."></textarea>
+
+  <button id="send">Отправить всем</button>
+  <div id="result"></div>
+
+  <script>
+    document.getElementById('send').onclick = async () => {
+      const secret = document.getElementById('secret').value.trim();
+      const text = document.getElementById('text').value.trim();
+      const btn = document.getElementById('send');
+      const result = document.getElementById('result');
+      result.className = ''; result.style.display = 'none';
+      if (!secret || !text) { alert('Заполни секрет и текст'); return; }
+      btn.disabled = true; btn.textContent = 'Отправка...';
+      try {
+        const r = await fetch('/api/announce', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + secret },
+          body: JSON.stringify({ text }),
+        });
+        const data = await r.json();
+        if (r.ok && data.ok) {
+          result.className = 'ok';
+          result.textContent = `Готово. Отправлено: ${data.sent}, ошибок: ${data.failed}, всего пользователей: ${data.total_users}`;
+        } else {
+          result.className = 'err';
+          result.textContent = 'Ошибка: ' + (data.error || r.status);
+        }
+      } catch (e) {
+        result.className = 'err';
+        result.textContent = 'Ошибка сети: ' + e.message;
+      }
+      result.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Отправить всем';
+    };
+  </script>
+</body>
+</html>"""
+
+
+@app.route('/admin', methods=['GET'])
+def admin_page():
+    return ADMIN_PAGE, 200, {'Content-Type': 'text/html; charset=utf-8'}
