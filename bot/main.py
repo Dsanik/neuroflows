@@ -236,7 +236,9 @@ def parse_freeform(text):
     t = text.lower()
     result = {}
 
-    m = re.search(r'/mood(?:@\w+)?\s*(\d)', t)
+    # Explicit numbers always win over vague keywords — "плохо... но на 4"
+    # should record 4, not fall back to the "плохо" keyword guess.
+    m = re.search(r'/mood(?:@\w+)?\s*(\d)', t) or re.search(r'настроени\w*\D{0,12}(\d)', t)
     if m:
         result['mood_score'] = max(1, min(5, int(m.group(1))))
     else:
@@ -245,7 +247,7 @@ def parse_freeform(text):
                 result['mood_score'] = score
                 break
 
-    m = re.search(r'/pain(?:@\w+)?\s*(\d+)', t)
+    m = re.search(r'/pain(?:@\w+)?\s*(\d+)', t) or re.search(r'\bбол\w*\D{0,12}(\d+)', t)
     if m:
         result['pain_score'] = max(0, min(10, int(m.group(1))))
     elif re.search(r'болит|боль|больно', t):
@@ -356,21 +358,78 @@ def webhook():
         return jsonify({'ok': True})
 
     if text.startswith('/start'):
+        kv_delete(f'awaiting:{chat_id}')
         send_message(chat_id,
             'Привет! 🌸 NeuroFlow — твой бережный помощник для отслеживания '
             'менструального цикла, овуляции и самочувствия.\n\n'
-            'Можешь писать мне прямо сюда: "настроение так себе", "болит живот", '
-            '"съела овсянку" — я запишу в дневник. Или открой полное приложение кнопкой ниже.',
+            'Команды: /mood — настроение, /pain — боль, /ate — что съела. '
+            'Просто отправь команду, и я спрошу, что нужно. Или открой полное приложение кнопкой ниже.',
             reply_markup={'inline_keyboard': [[{'text': 'Открыть NeuroFlow', 'web_app': {'url': MINI_APP_URL}}]]})
         return jsonify({'ok': True})
 
     if not text:
         return jsonify({'ok': True})
 
+    t_lower = text.lower()
+
+    # Bare commands (no value attached) start a short, unambiguous back-and-forth
+    # instead of trying to guess a number out of whatever the person says next.
+    if re.match(r'^/mood(?:@\w+)?\s*$', t_lower):
+        kv_set(f'awaiting:{chat_id}', 'mood')
+        send_message(chat_id, 'Как настроение? Ответь числом от 1 (совсем плохо) до 5 (отлично).')
+        return jsonify({'ok': True})
+    if re.match(r'^/pain(?:@\w+)?\s*$', t_lower):
+        kv_set(f'awaiting:{chat_id}', 'pain')
+        send_message(chat_id, 'Насколько сильная боль? Число от 0 (совсем нет) до 10 (невыносимая).')
+        return jsonify({'ok': True})
+    if re.match(r'^/ate(?:@\w+)?\s*$', t_lower):
+        kv_set(f'awaiting:{chat_id}', 'food')
+        send_message(chat_id, 'Что съела?')
+        return jsonify({'ok': True})
+
+    # If we just asked a targeted question, this message IS the answer to
+    # exactly that question — no need to guess between several possible
+    # fields the way the general free-text parser does.
+    awaiting = kv_get(f'awaiting:{chat_id}')
+    if awaiting:
+        kv_delete(f'awaiting:{chat_id}')
+        if awaiting == 'mood':
+            m = re.search(r'\d', text)
+            if not m:
+                for score, words in MOOD_KEYWORDS.items():
+                    if any(w in t_lower for w in words):
+                        m = score
+                        break
+            if m is None:
+                send_message(chat_id, 'Не поняла. Просто пришли число от 1 до 5.')
+                return jsonify({'ok': True})
+            score = max(1, min(5, int(m.group(0)) if hasattr(m, 'group') else m))
+            parsed = {'mood_score': score}
+        elif awaiting == 'pain':
+            m = re.search(r'\d+', text)
+            if not m:
+                send_message(chat_id, 'Не поняла. Просто пришли число от 0 до 10.')
+                return jsonify({'ok': True})
+            parsed = {'pain_score': max(0, min(10, int(m.group(0))))}
+        else:  # food
+            parsed = {'food': text.strip()}
+
+        summary = format_confirmation(parsed)
+        kv_set(f'pending:{chat_id}', parsed)
+        send_message(chat_id, f'Записала: {summary}. Всё верно?', reply_markup={
+            'inline_keyboard': [[
+                {'text': 'Да', 'callback_data': 'confirm_yes'},
+                {'text': 'Нет', 'callback_data': 'confirm_no'},
+            ]]
+        })
+        return jsonify({'ok': True})
+
+    # No pending question — fall back to the general free-text parser for
+    # spontaneous messages like "болит живот, съела суп".
     parsed = parse_freeform(text)
     summary = format_confirmation(parsed)
     if not summary:
-        send_message(chat_id, 'Не поняла, что записать. Попробуй, например: "настроение хорошее", "болит живот 6", "съела суп".')
+        send_message(chat_id, 'Не поняла, что записать. Попробуй, например: "настроение хорошее", "болит живот 6", "съела суп" — или отправь /mood, /pain, /ate отдельной командой.')
         return jsonify({'ok': True})
 
     kv_set(f'pending:{chat_id}', parsed)
