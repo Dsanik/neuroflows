@@ -59,7 +59,7 @@ if (tg) {
 
 // ===== STORE =====
 const KEY = 'nf_v2';
-const APP_BUILD = '2026.08.17-8';
+const APP_BUILD = '2026.08.17-9';
 const TUTORIAL_KEY = 'nf_tutorial_v2';
 const BACKEND_URL = 'https://neuroflows-eta.vercel.app'; // Vercel backend for push notification registration
 let subs = [];
@@ -78,6 +78,7 @@ let state = {
   coachMarksSeen: {},
   pet: null, // { type: 'cat', name: 'Мурка' } — set once user picks a companion
   calorieGoal: 2000,
+  botLogs: {}, // { [date]: {mood_score, pain_score, symptoms, meals} } — synced from bot commands
   meals: {}, // { [date]: [{id, name, calories}] }
 };
 
@@ -372,6 +373,19 @@ function registerWithBackend() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, settings: state.notifSettings, lastPeriodStart: state.lastPeriodStart, profile: state.profile }),
   }).catch(() => { /* backend unreachable — local settings still saved, notifications just won't fire */ });
+}
+
+async function syncBotLogs() {
+  const chatId = tg?.initDataUnsafe?.user?.id;
+  if (!BACKEND_URL || !chatId) return;
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/logs?chat_id=${chatId}`);
+    const data = await r.json();
+    if (data.ok && data.logs) {
+      state.botLogs = data.logs;
+      saveStore(); pub();
+    }
+  } catch (e) { /* offline or backend unreachable — silently skip, not critical */ }
 }
 
 function initStore(id) {
@@ -1148,6 +1162,7 @@ function Calendar() {
             const cat = dn ? NE.dcat(dn, cycleLength) : null;
             const c = cat ? NE.dc(cat) : theme.text2;
             const log = logs[infoDate];
+            const botLog = store.getState().botLogs[infoDate];
             const dateLabel = `${dObj.getDate()} ${['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'][dObj.getMonth()]}`;
             return html`
               <${Card} style="margin-top:16px;border-color:${c}35;background:${c}10;" class="anim">
@@ -1155,7 +1170,7 @@ function Calendar() {
                   <div style="font-size:15px;font-weight:800;color:${c};">${dateLabel}${cat ? ' — ' + NE.dn(cat) : ''}</div>
                   <button onClick=${()=>setInfoDate(null)} style="background:var(--surface);border:none;border-radius:10px;width:28px;height:28px;color:var(--text2);font-size:14px;cursor:pointer;flex-shrink:0;">✕</button>
                 </div>
-                ${cat && html`<p style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:${log ? '14px' : '0'};">${NE.ddesc(cat)}</p>`}
+                ${cat && html`<p style="font-size:13px;color:var(--text);line-height:1.6;margin-bottom:${(log||botLog) ? '14px' : '0'};">${NE.ddesc(cat)}</p>`}
                 ${log ? html`
                   <div style="display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid ${c}25;">
                     ${log.isPeriod && html`<div style="font-size:12px;color:${theme.danger};font-weight:700;">🩸 Отмечена менструация</div>`}
@@ -1167,7 +1182,16 @@ function Calendar() {
                       <span>Сон: <b style="color:var(--text);">${log.sleepQuality}/5</b></span>
                     </div>
                   </div>
-                ` : html`<p style="font-size:12px;color:var(--text2);margin-top:${cat?'12px':'0'};">Нет записи за этот день</p>`}
+                ` : !botLog && html`<p style="font-size:12px;color:var(--text2);margin-top:${cat?'12px':'0'};">Нет записи за этот день</p>`}
+                ${botLog && html`
+                  <div style="display:flex;flex-direction:column;gap:6px;padding-top:12px;margin-top:${log?'12px':'0'};border-top:1px solid ${c}25;">
+                    <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.08em;">💬 Через бота</div>
+                    ${typeof botLog.mood_score === 'number' && html`<div style="font-size:12px;color:var(--text2);">Настроение: <b style="color:var(--text);">${botLog.mood_score}/5</b></div>`}
+                    ${typeof botLog.pain_score === 'number' && html`<div style="font-size:12px;color:var(--text2);">Боль: <b style="color:var(--text);">${botLog.pain_score}/10</b></div>`}
+                    ${botLog.symptoms?.length > 0 && html`<div style="font-size:12px;color:var(--text2);">Симптомы: <span style="color:var(--text);font-weight:600;">${botLog.symptoms.map(s=>({headache:'Головная боль',cramps:'Тянущие боли',bloating:'Вздутие',fatigue:'Усталость',insomnia:'Бессонница'}[s]||s)).join(', ')}</span></div>`}
+                    ${botLog.meals?.length > 0 && html`<div style="font-size:12px;color:var(--text2);">Еда: <span style="color:var(--text);">${botLog.meals.join('; ')}</span></div>`}
+                  </div>
+                `}
               <//>
             `;
           })()}
@@ -1765,6 +1789,7 @@ function App() {
       setShowTutorial(!store.getState().tutorialSeen);
       const uid = tg?.initDataUnsafe?.user?.id;
       initStore(uid ? uid.toString() : 'guest');
+      syncBotLogs();
       unsub = store.sub(s => {
         setLps(s.lastPeriodStart);
         setShowTutorial(!s.tutorialSeen);
