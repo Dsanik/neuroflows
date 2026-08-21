@@ -69,6 +69,10 @@ def kv_smembers(key):
     return r.json().get('result', []) or []
 
 
+def kv_delete(key):
+    requests.get(f'{KV_URL}/del/{key}', headers=_kv_headers(), timeout=10)
+
+
 @app.route('/api/register', methods=['POST'])
 def register():
     if not KV_URL or not KV_TOKEN:
@@ -205,6 +209,117 @@ def export_file():
         return jsonify({'error': str(e)}), 500
 
 
+import re
+
+def today_iso():
+    return datetime.now().strftime('%Y-%m-%d')
+
+MOOD_KEYWORDS = {
+    5: ['отлично', 'супер', 'прекрасно', 'кайф', 'великолепно'],
+    4: ['хорошо', 'норм', 'неплохо', 'бодро'],
+    3: ['так себе', 'средне', 'никак', 'обычно'],
+    2: ['плохо', 'паршиво', 'фигово', 'грустно', 'устала', 'вымотана'],
+    1: ['ужасно', 'отвратительно', 'кошмар', 'невыносимо'],
+}
+SYMPTOM_KEYWORDS = {
+    'headache': ['голова', 'мигрень', 'башка'],
+    'cramps': ['живот', 'спазм', 'тянет низ'],
+    'bloating': ['вздутие', 'раздуло'],
+    'fatigue': ['устал', 'вымотан', 'без сил', 'выжата'],
+    'insomnia': ['не спала', 'бессонница', 'не могу уснуть'],
+}
+
+def parse_freeform(text):
+    """Best-effort regex/keyword parse of a free-text message into structured
+    fields. Deliberately simple (no ML) — per the plan, upgrade only if
+    traffic justifies it."""
+    t = text.lower()
+    result = {}
+
+    m = re.search(r'/mood(?:@\w+)?\s*(\d)', t)
+    if m:
+        result['mood_score'] = max(1, min(5, int(m.group(1))))
+    else:
+        for score, words in MOOD_KEYWORDS.items():
+            if any(w in t for w in words):
+                result['mood_score'] = score
+                break
+
+    m = re.search(r'/pain(?:@\w+)?\s*(\d+)', t)
+    if m:
+        result['pain_score'] = max(0, min(10, int(m.group(1))))
+    elif re.search(r'болит|боль|больно', t):
+        result.setdefault('pain_score', None)  # flagged as pain mentioned, intensity unknown
+
+    # Non-greedy, stops at the next /command if the message chains several
+    # (e.g. "/ate суп /mood 4") — otherwise a greedy .+ would swallow the
+    # rest of the message into the food field.
+    m = re.search(r'/ate(?:@\w+)?\s+([^/]+)', text, re.IGNORECASE)
+    if m:
+        result['food'] = m.group(1).strip()
+    elif re.search(r'\bсъела\b|\bпоела\b|\bела\b', t):
+        result['food'] = text.strip()
+
+    found_symptoms = []
+    for key, words in SYMPTOM_KEYWORDS.items():
+        if any(w in t for w in words):
+            found_symptoms.append(key)
+    if found_symptoms:
+        result['symptoms'] = found_symptoms
+
+    return result
+
+
+def format_confirmation(parsed):
+    parts = []
+    if 'mood_score' in parsed:
+        parts.append(f"настроение {parsed['mood_score']}/5")
+    if parsed.get('pain_score') is not None:
+        parts.append(f"боль {parsed['pain_score']}/10")
+    elif 'pain_score' in parsed:
+        parts.append('упомянута боль')
+    if parsed.get('symptoms'):
+        labels = {'headache':'головная боль','cramps':'тянущие боли','bloating':'вздутие','fatigue':'усталость','insomnia':'бессонница'}
+        parts.append(', '.join(labels.get(s, s) for s in parsed['symptoms']))
+    if parsed.get('food'):
+        parts.append(f"приём пищи — {parsed['food']}")
+    return ', '.join(parts) if parts else None
+
+
+def send_message(chat_id, text, reply_markup=None):
+    payload = {'chat_id': chat_id, 'text': text}
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
+    try:
+        requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', json=payload, timeout=10)
+    except Exception as e:
+        print(f'sendMessage failed: {e}')
+
+
+def answer_callback(callback_id, text=''):
+    try:
+        requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery',
+                       json={'callback_query_id': callback_id, 'text': text}, timeout=10)
+    except Exception as e:
+        print(f'answerCallbackQuery failed: {e}')
+
+
+def commit_bot_log(chat_id, parsed):
+    date = today_iso()
+    key = f'botlog:{chat_id}:{date}'
+    existing = kv_get(key) or {}
+    if 'mood_score' in parsed:
+        existing['mood_score'] = parsed['mood_score']
+    if parsed.get('pain_score') is not None:
+        existing['pain_score'] = parsed['pain_score']
+    if parsed.get('symptoms'):
+        existing['symptoms'] = list(set(existing.get('symptoms', []) + parsed['symptoms']))
+    if parsed.get('food'):
+        existing.setdefault('meals', []).append(parsed['food'])
+    kv_set(key, existing)
+    kv_sadd(f'botlog_dates:{chat_id}', date)
+
+
 # Telegram calls this URL whenever someone messages the bot — but only once
 # you've told Telegram this URL exists, via setWebhook (see deployment notes).
 # Without setWebhook, this route is dead code: Telegram has no way to know
@@ -212,29 +327,59 @@ def export_file():
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
     update = request.get_json() or {}
+
+    # Button taps on the Да/Нет confirmation come in as callback_query, not message.
+    cb = update.get('callback_query')
+    if cb:
+        chat_id = cb.get('message', {}).get('chat', {}).get('id')
+        data = cb.get('data', '')
+        answer_callback(cb.get('id', ''))
+        if not chat_id:
+            return jsonify({'ok': True})
+        if data == 'confirm_yes':
+            pending = kv_get(f'pending:{chat_id}')
+            if pending:
+                commit_bot_log(chat_id, pending)
+                kv_delete(f'pending:{chat_id}')
+                send_message(chat_id, 'Записала ✅')
+            else:
+                send_message(chat_id, 'Нечего подтверждать — попробуй отправить сообщение ещё раз.')
+        elif data == 'confirm_no':
+            kv_delete(f'pending:{chat_id}')
+            send_message(chat_id, 'Хорошо, не записываю. Напиши ещё раз, как правильно.')
+        return jsonify({'ok': True})
+
     message = update.get('message', {})
     text = message.get('text', '')
     chat_id = message.get('chat', {}).get('id')
     if not chat_id:
         return jsonify({'ok': True})
+
     if text.startswith('/start'):
-        try:
-            requests.post(
-                f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
-                json={
-                    'chat_id': chat_id,
-                    'text': (
-                        'Привет! 🌸 NeuroFlow — твой бережный помощник для отслеживания '
-                        'менструального цикла, овуляции и самочувствия.\n\n'
-                        'Нажми кнопку ниже, чтобы начать.'
-                    ),
-                    'reply_markup': {'inline_keyboard': [[{
-                        'text': 'Открыть NeuroFlow',
-                        'web_app': {'url': MINI_APP_URL}
-                    }]]}
-                }, timeout=10)
-        except Exception as e:
-            print(f'Failed to send welcome message: {e}')
+        send_message(chat_id,
+            'Привет! 🌸 NeuroFlow — твой бережный помощник для отслеживания '
+            'менструального цикла, овуляции и самочувствия.\n\n'
+            'Можешь писать мне прямо сюда: "настроение так себе", "болит живот", '
+            '"съела овсянку" — я запишу в дневник. Или открой полное приложение кнопкой ниже.',
+            reply_markup={'inline_keyboard': [[{'text': 'Открыть NeuroFlow', 'web_app': {'url': MINI_APP_URL}}]]})
+        return jsonify({'ok': True})
+
+    if not text:
+        return jsonify({'ok': True})
+
+    parsed = parse_freeform(text)
+    summary = format_confirmation(parsed)
+    if not summary:
+        send_message(chat_id, 'Не поняла, что записать. Попробуй, например: "настроение хорошее", "болит живот 6", "съела суп".')
+        return jsonify({'ok': True})
+
+    kv_set(f'pending:{chat_id}', parsed)
+    send_message(chat_id, f'Записала: {summary}. Всё верно?', reply_markup={
+        'inline_keyboard': [[
+            {'text': 'Да', 'callback_data': 'confirm_yes'},
+            {'text': 'Нет', 'callback_data': 'confirm_no'},
+        ]]
+    })
     return jsonify({'ok': True})
 
 
@@ -308,6 +453,20 @@ ADMIN_PAGE = """<!DOCTYPE html>
   </script>
 </body>
 </html>"""
+
+
+@app.route('/api/logs', methods=['GET'])
+def get_bot_logs():
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        return jsonify({'error': 'chat_id required'}), 400
+    dates = kv_smembers(f'botlog_dates:{chat_id}')
+    logs = {}
+    for date in dates:
+        entry = kv_get(f'botlog:{chat_id}:{date}')
+        if entry:
+            logs[date] = entry
+    return jsonify({'ok': True, 'logs': logs})
 
 
 @app.route('/admin', methods=['GET'])
